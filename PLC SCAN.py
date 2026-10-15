@@ -678,53 +678,58 @@ elif seccion == "Reconocimiento del PLC":
 
                         resultado = resultados[0]
 
-                    st.subheader("📊 Resultados del análisis")
+st.subheader("📊 Resultados del análisis")
 
-                    imagen_analizada = resultado.plot()
+# Solo aceptar clases que identifiquen explícitamente un PLC
+clases_plc = (
+    "plc",
+    "programmable logic controller",
+    "controlador lógico programable",
+)
 
-                    st.image(
-                        imagen_analizada,
-                        channels="BGR",
-                        caption="Imagen procesada por YOLO",
-                        use_container_width=True
-                    )
+coincidencias_plc = []
 
-                    if (
-                        resultado.boxes is not None
-                ):
-                        st.success(
-                            f"Se detectaron {len(resultado.boxes)} "
-                            "objeto(s)."
-                        )
+if resultado.boxes is not None:
+    for caja in resultado.boxes:
+        clase = int(caja.cls[0].item())
+        confianza = float(caja.conf[0].item()) * 100
+        nombre_clase = str(resultado.names[clase])
 
-                        for caja in resultado.boxes:
-                            clase = int(caja.cls[0].item())
-                            confianza = (
-                                float(caja.conf[0].item()) * 100
-                            )
-                            nombre_clase = resultado.names[clase]
+        if any(
+            termino in nombre_clase.lower()
+            for termino in clases_plc
+        ):
+            coincidencias_plc.append(
+                (nombre_clase, confianza)
+            )
 
-                            st.write(f"**Objeto:** {nombre_clase}")
-                            st.write(
-                                f"**Confianza:** {confianza:.1f}%"
-                            )
+if coincidencias_plc:
+    st.success("Se detectó una clase compatible con PLC.")
 
-                    else:
-                        st.warning(
-                            "No se detectaron objetos en la fotografía. "
-                            "Prueba con una imagen más clara, enfocada "
-                            "y con buena iluminación."
-                        )
+    for nombre_clase, confianza in coincidencias_plc:
+        st.write(f"**Clase detectada:** {nombre_clase}")
+        st.write(f"**Confianza:** {confianza:.1f}%")
 
-                    st.info(
-                        "Esta prueba utiliza un modelo YOLO general. "
-                        "La detección de un objeto no confirma la marca "
-                        "ni el modelo exacto del PLC. Para identificarlo "
-                        "con precisión será necesario entrenar un modelo "
-                        "específico o incorporar reconocimiento de texto "
-                        "y búsqueda en la base de datos."
-                    )
+    st.info(
+        "La detección no confirma por sí sola la marca "
+        "ni el modelo exacto del equipo."
+    )
+else:
+    st.warning(
+        "No se pudo confirmar que el objeto sea un PLC."
+    )
 
+    st.write(
+        "El modelo actual no reconoce una clase específica "
+        "de PLC en esta imagen. No se mostrará un celular, "
+        "refrigerador u otro objeto como identificación válida."
+    )
+
+    st.info(
+        "Para identificar PLC reales necesitaremos integrar "
+        "un modelo especializado y validarlo con fotografías "
+        "de controladores industriales."
+    )
                 except Exception as error:
                     st.error(
                         "No fue posible analizar la imagen. "
