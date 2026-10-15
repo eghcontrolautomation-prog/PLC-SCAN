@@ -4,244 +4,352 @@ import pandas as pd
 from pathlib import Path
 import re
 import unicodedata
-from functools import lru_cache
-from ultralytics import YOLO
+from urllib.parse import urlparse
 from PIL import Image
+from functools import lru_cache
 
-# ==========================================
-# CONFIGURACION DE PLC SCAN
-# ==========================================
+# ============================================================
+# CONFIGURACIÓN GENERAL
+# ============================================================
 
 st.set_page_config(
-    page_title="PLC SCAN",
+    page_title="PLC SCAN | Automatización Industrial",
     page_icon="⚙️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent
 ARCHIVO_EXCEL = BASE_DIR / "base_datos.xlsx"
 ARCHIVO_MODELO = BASE_DIR / "yolo26n.pt"
 
+# ============================================================
+# DISEÑO VISUAL
+# ============================================================
 
-# ==========================================
-# CARGA DE BASE DE DATOS
-# ==========================================
-
-@st.cache_data
-def cargar_base_datos(ruta, fecha_modificacion):
-    return pd.read_excel(ruta)
-
-
-# ==========================================
-# CARGA DEL MODELO YOLO
-# ==========================================
-
-@st.cache_resource
-def cargar_modelo_yolo():
-    return YOLO(str(ARCHIVO_MODELO))
-
-
-# ==========================================
-# FUNCIONES AUXILIARES
-# ==========================================
-
-def normalizar(texto):
-    texto = str(texto).strip().lower()
-    texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(
-        caracter for caracter in texto
-        if not unicodedata.combining(caracter)
-    )
-    return "".join(
-        caracter for caracter in texto
-        if caracter.isalnum()
-    )
-
-
-def obtener_urls(texto):
-    if not texto:
-        return []
-
-    return re.findall(
-        r"https?://[^\s<>\"']+",
-        str(texto)
-    )
-
-
-def buscar_columna(columnas, *nombres):
-    columnas_normalizadas = {
-        normalizar(columna): columna
-        for columna in columnas
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background:
+            linear-gradient(
+                135deg,
+                rgba(5, 16, 39, 0.98),
+                rgba(10, 38, 75, 0.96)
+            );
+        color: #F2F6FC;
     }
 
-    for nombre in nombres:
-        clave = normalizar(nombre)
+    [data-testid="stSidebar"] {
+        background: #071426;
+        border-right: 1px solid #1C426B;
+    }
 
-        if clave in columnas_normalizadas:
-            return columnas_normalizadas[clave]
+    [data-testid="stSidebar"] * {
+        color: #F2F6FC;
+    }
+
+    h1, h2, h3 {
+        color: #66C7FF !important;
+    }
+
+    p, label, li {
+        color: #E4ECF7;
+    }
+
+    div[data-testid="stMetric"] {
+        background: rgba(17, 49, 82, 0.75);
+        border: 1px solid #28618D;
+        padding: 15px;
+        border-radius: 12px;
+    }
+
+    div.stButton > button {
+        background-color: #087FC1;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        padding: 0.55rem 1rem;
+    }
+
+    div.stButton > button:hover {
+        background-color: #119EEB;
+        color: white;
+        border: 1px solid #7ED2FF;
+    }
+
+    div[data-testid="stExpander"] {
+        border: 1px solid #28577E;
+        border-radius: 10px;
+    }
+
+    .djh-watermark {
+        position: fixed;
+        right: 25px;
+        bottom: 12px;
+        font-size: 45px;
+        font-weight: 900;
+        color: rgba(120, 190, 255, 0.10);
+        letter-spacing: 5px;
+        z-index: 0;
+        pointer-events: none;
+    }
+
+    .plc-header {
+        padding: 22px;
+        border: 1px solid #245581;
+        border-radius: 15px;
+        background: linear-gradient(
+            120deg,
+            rgba(9, 35, 65, 0.95),
+            rgba(14, 69, 109, 0.80)
+        );
+        margin-bottom: 20px;
+    }
+
+    .plc-subtitle {
+        color: #B8D9F2;
+        font-size: 16px;
+    }
+
+    .info-card {
+        background: rgba(13, 42, 72, 0.82);
+        border: 1px solid #245581;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+    </style>
+
+    <div class="djh-watermark">DJH</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ============================================================
+# FUNCIONES GENERALES
+# ============================================================
+
+def normalizar(valor):
+    """Normaliza texto para comparar encabezados y búsquedas."""
+    if pd.isna(valor):
+        return ""
+
+    texto = str(valor).strip().lower()
+
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(
+        caracter
+        for caracter in texto
+        if unicodedata.category(caracter) != "Mn"
+    )
+
+    texto = re.sub(r"[^a-z0-9]+", " ", texto)
+    return " ".join(texto.split())
+
+
+def valor_texto(valor):
+    """Convierte los valores vacíos de Excel en texto legible."""
+    if pd.isna(valor):
+        return "No disponible"
+
+    texto = str(valor).strip()
+
+    if not texto or texto.lower() in ("nan", "none", "null"):
+        return "No disponible"
+
+    return texto
+
+
+def buscar_columna(df, posibles_nombres):
+    """Encuentra una columna aunque tenga variaciones en su nombre."""
+    columnas_normalizadas = {
+        normalizar(columna): columna
+        for columna in df.columns
+    }
+
+    for nombre in posibles_nombres:
+        nombre_normalizado = normalizar(nombre)
+
+        if nombre_normalizado in columnas_normalizadas:
+            return columnas_normalizadas[nombre_normalizado]
+
+    for nombre in posibles_nombres:
+        nombre_normalizado = normalizar(nombre)
+
+        for columna_normalizada, columna_original in (
+            columnas_normalizadas.items()
+        ):
+            if (
+                nombre_normalizado
+                and nombre_normalizado in columna_normalizada
+            ):
+                return columna_original
 
     return None
 
 
-def obtener_valor(fila, *nombres):
-    columna = buscar_columna(fila.index, *nombres)
+def obtener_valor(fila, posibles_nombres):
+    """Obtiene un dato de una fila usando distintos nombres posibles."""
+    columnas_normalizadas = {
+        normalizar(columna): columna
+        for columna in fila.index
+    }
 
-    if columna is None:
-        return None
+    for nombre in posibles_nombres:
+        clave = normalizar(nombre)
 
-    valor = fila[columna]
-
-    if pd.isna(valor):
-        return None
-
-    valor = str(valor).strip()
-
-    return valor if valor else None
-
-
-def mostrar_enlace_manual(valor):
-    if not valor:
-        st.info("No hay un manual registrado para este PLC.")
-        return
-
-    urls = obtener_urls(valor)
-
-    if urls:
-        for numero, url in enumerate(dict.fromkeys(urls), start=1):
-            st.link_button(
-                f"Abrir manual o documentación {numero}",
-                url
+        if clave in columnas_normalizadas:
+            return valor_texto(
+                fila[columnas_normalizadas[clave]]
             )
+
+    for nombre in posibles_nombres:
+        clave = normalizar(nombre)
+
+        for columna_normalizada, columna_original in (
+            columnas_normalizadas.items()
+        ):
+            if clave and clave in columna_normalizada:
+                return valor_texto(fila[columna_original])
+
+    return "No disponible"
+
+
+def es_url(valor):
+    """Comprueba si un texto contiene una dirección web válida."""
+    if not valor or valor == "No disponible":
+        return False
+
+    try:
+        resultado = urlparse(valor)
+        return resultado.scheme in ("http", "https") and bool(
+            resultado.netloc
+        )
+    except Exception:
+        return False
+
+
+def mostrar_enlace_manual(valor, texto="Abrir recurso"):
+    """Muestra un enlace si el dato de Excel es una URL."""
+    if valor == "No disponible":
+        st.caption("No hay un recurso registrado.")
+    elif es_url(valor):
+        st.markdown(f"[{texto}]({valor})")
     else:
         st.write(valor)
 
 
-def buscar_coincidencias(datos, texto):
-    if datos is None or datos.empty or not texto.strip():
-        return datos.iloc[0:0] if datos is not None else pd.DataFrame()
+def buscar_coincidencias(df, consulta):
+    """Busca por marca, modelo, familia, serie y otros datos."""
+    consulta_normalizada = normalizar(consulta)
 
-    coincidencias = datos.astype(str).apply(
-        lambda columna: columna.str.contains(
-            texto.strip(),
-            case=False,
-            na=False,
-            regex=False
+    if not consulta_normalizada:
+        return df.copy()
+
+    columnas_busqueda = [
+        columna
+        for columna in [
+            buscar_columna(df, ["Marca", "Fabricante"]),
+            buscar_columna(df, ["Modelo exacto", "Modelo"]),
+            buscar_columna(df, ["Familia", "Familia PLC"]),
+            buscar_columna(
+                df,
+                ["Serie / Subfamilia", "Serie", "Subfamilia"],
+            ),
+            buscar_columna(
+                df,
+                ["Clasificación", "Tipo de PLC", "Tipo"],
+            ),
+            buscar_columna(
+                df,
+                ["Arquitectura", "Interfaz", "Comunicación"],
+            ),
+        ]
+        if columna is not None
+    ]
+
+    if not columnas_busqueda:
+        return df.iloc[0:0].copy()
+
+    mascara = pd.Series(False, index=df.index)
+
+    for columna in columnas_busqueda:
+        mascara |= (
+            df[columna]
+            .fillna("")
+            .astype(str)
+            .map(normalizar)
+            .str.contains(
+                re.escape(consulta_normalizada),
+                regex=True,
+                na=False,
+            )
         )
-    ).any(axis=1)
 
-    return datos.loc[coincidencias]
-
-
-# ==========================================
-# ESTILO VISUAL Y MARCA DE AGUA DJH
-# ==========================================
-
-st.markdown("""
-<style>
-.stApp {
-    background: linear-gradient(
-        135deg,
-        #07111F,
-        #12304B,
-        #07111F
-    );
-    color: #F1F5F9;
-}
-
-[data-testid="stHeader"] {
-    background: rgba(5, 16, 31, 0.85);
-}
-
-[data-testid="stSidebar"] {
-    background: #071425;
-    border-right: 1px solid #1E4970;
-}
-
-h1, h2, h3 {
-    color: #55C5FF !important;
-}
-
-p, label, [data-testid="stMarkdownContainer"] {
-    color: #E2EAF3;
-}
-
-div[data-baseweb="input"] input {
-    background-color: #10243A;
-    color: white;
-    border: 1px solid #2C587B;
-}
-
-.stButton > button {
-    background: #0879D9;
-    color: white;
-    border: 1px solid #36A9FF;
-    border-radius: 8px;
-    font-weight: 600;
-}
-
-.stButton > button:hover {
-    background: #1598FF;
-    color: white;
-    border: 1px solid #8DD4FF;
-}
-
-[data-testid="stMetric"],
-[data-testid="stExpander"] {
-    background: rgba(12, 34, 56, 0.90);
-    border: 1px solid #254967;
-    border-radius: 12px;
-}
-
-hr {
-    border-color: #254967;
-}
-
-.stApp::before {
-    content: "DJH";
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: clamp(100px, 22vw, 320px);
-    font-weight: 900;
-    font-family: Arial, Helvetica, sans-serif;
-    letter-spacing: 18px;
-    color: rgba(100, 190, 255, 0.055);
-    pointer-events: none;
-    z-index: 0;
-    white-space: nowrap;
-}
-
-[data-testid="stAppViewContainer"] {
-    position: relative;
-}
-</style>
-""", unsafe_allow_html=True)
+    return df[mascara].copy()
 
 
-# ==========================================
-# ENCABEZADO PRINCIPAL
-# ==========================================
+# ============================================================
+# CARGA DE BASE DE DATOS
+# ============================================================
 
-st.title("⚙️ PLC SCAN")
+@st.cache_data
+def cargar_base_datos(ruta_archivo, fecha_modificacion):
+    """Carga el archivo Excel y conserva sus columnas originales."""
+    return pd.read_excel(ruta_archivo)
 
-st.subheader("Identificación y consulta técnica de PLC")
 
-st.write(
-    "Sistema de consulta de controladores lógicos "
-    "programables para automatización industrial."
+if not ARCHIVO_EXCEL.exists():
+    st.error(
+        "No se encontró el archivo base_datos.xlsx. "
+        "Colócalo junto al archivo PLC SCAN.py."
+    )
+    st.stop()
+
+try:
+    df = cargar_base_datos(
+        str(ARCHIVO_EXCEL),
+        ARCHIVO_EXCEL.stat().st_mtime,
+    )
+
+    df.columns = [
+        str(columna).strip()
+        for columna in df.columns
+    ]
+
+    df = df.dropna(how="all")
+
+except Exception as error:
+    st.error("No se pudo cargar la base de datos de Excel.")
+    st.code(str(error))
+    st.stop()
+
+
+# ============================================================
+# ENCABEZADO
+# ============================================================
+
+st.markdown(
+    """
+    <div class="plc-header">
+        <h1>⚙️ PLC SCAN</h1>
+        <div class="plc-subtitle">
+            Identificación técnica de controladores lógicos
+            programables y consulta de interfaces de comunicación.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-st.divider()
+# ============================================================
+# MENÚ LATERAL
+# ============================================================
 
-
-# ==========================================
-# MENU LATERAL
-# ==========================================
-
-st.sidebar.title("PLC SCAN")
-st.sidebar.caption("Panel de navegación")
+st.sidebar.title("⚙️ PLC SCAN")
+st.sidebar.caption("Automatización Industrial")
 
 seccion = st.sidebar.radio(
     "Selecciona una sección:",
@@ -251,396 +359,553 @@ seccion = st.sidebar.radio(
         "Buscar PLC",
         "Ficha técnica",
         "Reconocimiento del PLC",
-        "Comunicación industrial"
-    ]
+        "Comunicación industrial",
+    ],
 )
 
+st.sidebar.divider()
 
-# ==========================================
-# CARGAR EXCEL
-# ==========================================
+st.sidebar.caption(
+    "Consulta de modelos, especificaciones, pinout, "
+    "software, manuales e interfaces."
+)
 
-datos = None
-error_excel = None
-
-if ARCHIVO_EXCEL.exists():
-    try:
-        fecha_modificacion = ARCHIVO_EXCEL.stat().st_mtime
-
-        datos = cargar_base_datos(
-            str(ARCHIVO_EXCEL),
-            fecha_modificacion
-        )
-
-        datos = datos.dropna(how="all").dropna(
-            axis=1,
-            how="all"
-        )
-
-        datos.columns = [
-            str(columna).strip()
-            for columna in datos.columns
-        ]
-
-    except Exception as error:
-        error_excel = str(error)
-
-
-# ==========================================
+# ============================================================
 # INICIO
-# ==========================================
+# ============================================================
 
 if seccion == "Inicio":
 
-    st.header("Panel principal")
+    st.subheader("Panel principal")
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.metric("Estado de la aplicación", "Activa")
-
-    with col2:
-        cantidad = len(datos) if datos is not None else 0
-        st.metric("PLC registrados", cantidad)
-
-    st.info(
-        "Utiliza el menú lateral para consultar los PLC, "
-        "buscar modelos o revisar la información disponible."
+    st.write(
+        "PLC SCAN es una herramienta de consulta técnica diseñada "
+        "para facilitar la identificación de controladores lógicos "
+        "programables y la revisión de sus características."
     )
 
-    st.markdown("### Funciones del sistema")
+    total_registros = len(df)
 
-    st.markdown("""
-    - Consulta de PLC registrados en Excel.
-    - Búsqueda por fabricante, modelo o características.
-    - Visualización de fichas técnicas.
-    - Consulta de interfaces y protocolos industriales.
-    - Pruebas de reconocimiento de imágenes.
-    """)
+    columna_marca = buscar_columna(
+        df,
+        ["Marca", "Fabricante"],
+    )
+
+    if columna_marca:
+        total_marcas = (
+            df[columna_marca]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .nunique()
+        )
+    else:
+        total_marcas = 0
+
+    columna_modelo = buscar_columna(
+        df,
+        ["Modelo exacto", "Modelo"],
+    )
+
+    if columna_modelo:
+        total_modelos = (
+            df[columna_modelo]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .nunique()
+        )
+    else:
+        total_modelos = 0
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Registros disponibles", total_registros)
+    col2.metric("Marcas registradas", total_marcas)
+    col3.metric("Modelos registrados", total_modelos)
+
+    st.markdown("### Funciones disponibles")
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown(
+            """
+            <div class="info-card">
+                <h4>🔎 Búsqueda de PLC</h4>
+                Consulta los equipos registrados por marca,
+                modelo, familia o serie.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            """
+            <div class="info-card">
+                <h4>📋 Ficha técnica</h4>
+                Consulta especificaciones, pinout,
+                software, cables y manuales disponibles.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c2:
+        st.markdown(
+            """
+            <div class="info-card">
+                <h4>🧠 Reconocimiento de imágenes</h4>
+                Prueba el análisis visual de fotografías
+                de equipos industriales.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            """
+            <div class="info-card">
+                <h4>🔌 Comunicación industrial</h4>
+                Consulta información introductoria sobre
+                las principales interfaces y redes industriales.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
-# ==========================================
+# ============================================================
 # BASE DE DATOS
-# ==========================================
+# ============================================================
 
 elif seccion == "Base de datos":
 
-    st.header("Base de datos de PLC")
+    st.subheader("📚 Base de datos de PLC")
 
-    if datos is not None:
+    st.write(
+        "Registros técnicos disponibles en el archivo Excel."
+    )
 
-        st.success("Base de datos cargada correctamente.")
+    st.caption(
+        f"Total de registros: {len(df)} | "
+        f"Total de columnas: {len(df.columns)}"
+    )
 
-        col1, col2 = st.columns(2)
+    busqueda_tabla = st.text_input(
+        "Filtrar registros:",
+        placeholder="Escribe una marca, modelo o característica...",
+        key="filtro_base_datos",
+    )
 
-        with col1:
-            st.metric("Registros", len(datos))
-
-        with col2:
-            st.metric("Columnas", len(datos.columns))
-
-        st.dataframe(
-            datos,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.download_button(
-            "Descargar copia de los datos como CSV",
-            data=datos.to_csv(index=False).encode("utf-8-sig"),
-            file_name="base_datos_plc.csv",
-            mime="text/csv"
-        )
-
-    elif error_excel:
-        st.error("No fue posible leer el archivo Excel.")
-        st.code(error_excel)
-
+    if busqueda_tabla.strip():
+        tabla = buscar_coincidencias(df, busqueda_tabla)
     else:
-        st.warning(
-            "No se encontró base_datos.xlsx. "
-            "Coloca el archivo en la carpeta del proyecto."
-        )
+        tabla = df.copy()
+
+    st.dataframe(
+        tabla,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.download_button(
+        label="Descargar resultados en CSV",
+        data=tabla.to_csv(index=False).encode("utf-8-sig"),
+        file_name="PLC_SCAN_resultados.csv",
+        mime="text/csv",
+    )
 
 
-# ==========================================
+# ============================================================
 # BUSCAR PLC
-# ==========================================
+# ============================================================
 
 elif seccion == "Buscar PLC":
 
-    st.header("Buscar un PLC")
+    st.subheader("🔎 Buscar controlador")
 
-    if datos is not None and not datos.empty:
+    consulta = st.text_input(
+        "Ingresa la marca, modelo, familia o serie:",
+        placeholder="Ejemplo: Siemens, Allen-Bradley, KV-N60...",
+    )
 
-        busqueda = st.text_input(
-            "Fabricante, modelo o característica",
-            placeholder="Ejemplo: Siemens, S7-1200, Allen-Bradley"
+    if consulta.strip():
+
+        resultados_busqueda = buscar_coincidencias(
+            df,
+            consulta,
         )
 
-        if busqueda.strip():
-            resultados_busqueda = buscar_coincidencias(
-                datos,
-                busqueda
+        if resultados_busqueda.empty:
+            st.warning(
+                "No se encontraron coincidencias en la base de datos."
             )
         else:
-            resultados_busqueda = datos
+            st.success(
+                f"Se encontraron {len(resultados_busqueda)} "
+                "coincidencia(s)."
+            )
 
-        st.write(
-            f"Resultados encontrados: {len(resultados_busqueda)}"
-        )
+            for indice, (_, fila) in enumerate(
+                resultados_busqueda.iterrows()
+            ):
+                marca = obtener_valor(
+                    fila,
+                    ["Marca", "Fabricante"],
+                )
 
-        st.dataframe(
-            resultados_busqueda,
-            use_container_width=True,
-            hide_index=True
-        )
+                modelo = obtener_valor(
+                    fila,
+                    ["Modelo exacto", "Modelo"],
+                )
 
-    elif error_excel:
-        st.error("Error al leer el Excel.")
-        st.code(error_excel)
+                familia = obtener_valor(
+                    fila,
+                    ["Familia", "Familia PLC"],
+                )
 
-    else:
-        st.warning(
-            "Agrega tu archivo base_datos.xlsx "
-            "para comenzar a buscar PLC."
-        )
+                with st.expander(
+                    f"{marca} | {modelo}",
+                    expanded=(indice == 0),
+                ):
+                    st.write(f"**Marca:** {marca}")
+                    st.write(f"**Modelo:** {modelo}")
+                    st.write(f"**Familia:** {familia}")
+
+                    st.write(
+                        "**Tipo de PLC:** "
+                        + obtener_valor(
+                            fila,
+                            [
+                                "Clasificación",
+                                "Tipo de PLC",
+                                "Tipo",
+                            ],
+                        )
+                    )
+
+                    st.write(
+                        "**Serie:** "
+                        + obtener_valor(
+                            fila,
+                            [
+                                "Serie / Subfamilia",
+                                "Serie",
+                                "Subfamilia",
+                            ],
+                        )
+                    )
+
+                    st.write(
+                        "**Pinout:** "
+                        + obtener_valor(
+                            fila,
+                            [
+                                "Pin Out",
+                                "Pinout",
+                                "Pin Out / Pinout",
+                            ],
+                        )
+                    )
+
+                    st.write(
+                        "**Interfaz:** "
+                        + obtener_valor(
+                            fila,
+                            [
+                                "Interfaz",
+                                "Interfaces",
+                                "Interfaz de comunicación",
+                            ],
+                        )
+                    )
+
+                    st.write(
+                        "**Cable:** "
+                        + obtener_valor(
+                            fila,
+                            [
+                                "Cable",
+                                "Cable requerido",
+                                "Cable de programación",
+                            ],
+                        )
+                    )
+
+                    st.write(
+                        "**Software:** "
+                        + obtener_valor(
+                            fila,
+                            [
+                                "Software",
+                                "Software de programación",
+                            ],
+                        )
+                    )
+
+                    manual = obtener_valor(
+                        fila,
+                        ["Manual", "Manual PDF", "Manual técnico"],
+                    )
+
+                    st.write("**Manual:**")
+                    mostrar_enlace_manual(
+                        manual,
+                        "Abrir manual técnico",
+                    )
 
 
-# ==========================================
-# FICHA TECNICA DEL PLC
-# ==========================================
+# ============================================================
+# FICHA TÉCNICA
+# ============================================================
 
 elif seccion == "Ficha técnica":
 
-    st.header("Ficha técnica del PLC")
+    st.subheader("📋 Ficha técnica del PLC")
 
-    st.write(
-        "Consulta las características, conexiones, "
-        "documentación y datos de identificación del equipo."
-    )
+    if df.empty:
+        st.warning("La base de datos no contiene registros.")
+    else:
+        columna_marca = buscar_columna(
+            df,
+            ["Marca", "Fabricante"],
+        )
 
-    if datos is not None and not datos.empty:
+        columna_modelo = buscar_columna(
+            df,
+            ["Modelo exacto", "Modelo"],
+        )
 
-        def etiqueta_fila(indice):
-            fila = datos.loc[indice]
+        if columna_marca and columna_modelo:
 
-            marca = obtener_valor(fila, "Marca") or ""
+            opciones = []
+
+            for indice, fila in df.iterrows():
+                marca = valor_texto(fila[columna_marca])
+                modelo = valor_texto(fila[columna_modelo])
+
+                opciones.append(
+                    (f"{marca} | {modelo}", indice)
+                )
+
+            etiquetas = [
+                etiqueta
+                for etiqueta, _ in opciones
+            ]
+
+            seleccion = st.selectbox(
+                "Selecciona el equipo:",
+                etiquetas,
+            )
+
+            indice_seleccionado = dict(opciones)[seleccion]
+            fila = df.loc[indice_seleccionado]
+
+            marca = obtener_valor(
+                fila,
+                ["Marca", "Fabricante"],
+            )
 
             modelo = obtener_valor(
                 fila,
-                "Modelo exacto",
-                "Modelo",
-                "Nombre del PLC"
-            ) or ""
-
-            identificador = obtener_valor(fila, "ID") or ""
-
-            partes = [
-                parte for parte in
-                [identificador, marca, modelo]
-                if parte
-            ]
-
-            return " | ".join(partes) or f"Registro {indice}"
-
-        registros = datos.index.tolist()
-
-        seleccionado = st.selectbox(
-            "Selecciona el PLC:",
-            registros,
-            format_func=etiqueta_fila,
-            key="selector_ficha_plc"
-        )
-
-        ficha = datos.loc[seleccionado]
-
-        marca = obtener_valor(ficha, "Marca", "Fabricante")
-        modelo = obtener_valor(
-            ficha,
-            "Modelo exacto",
-            "Modelo",
-            "Nombre del PLC"
-        )
-        familia = obtener_valor(ficha, "Familia")
-        serie = obtener_valor(
-            ficha,
-            "Serie / Subfamilia",
-            "Serie",
-            "Subfamilia"
-        )
-        clasificacion = obtener_valor(
-            ficha,
-            "Clasificación",
-            "Tipo de PLC"
-        )
-        arquitectura = obtener_valor(ficha, "Arquitectura")
-
-        st.divider()
-        st.subheader(modelo or "Modelo no especificado")
-
-        if marca:
-            st.caption(f"Fabricante: {marca}")
-
-        metricas = [
-            ("Marca", marca),
-            ("Familia", familia),
-            ("Clasificación", clasificacion),
-            ("Arquitectura", arquitectura)
-        ]
-
-        metricas_disponibles = [
-            (titulo, valor)
-            for titulo, valor in metricas
-            if valor
-        ]
-
-        if metricas_disponibles:
-            columnas = st.columns(
-                min(len(metricas_disponibles), 4)
+                ["Modelo exacto", "Modelo"],
             )
 
-            for i, (titulo, valor) in enumerate(
-                metricas_disponibles
-            ):
-                with columnas[i]:
-                    st.metric(titulo, valor)
+            st.markdown(
+                f"### {marca} — {modelo}"
+            )
 
-        if serie:
-            st.write(f"**Serie / subfamilia:** {serie}")
+            col1, col2 = st.columns(2)
 
-        st.divider()
-        st.markdown("### 🔌 Conexión e interfaz")
+            with col1:
+                st.markdown("#### Identificación")
 
-        campos_conexion = [
-            ("PIN OUT", ("PIN OUT", "Pinout", "Pin Out")),
-            (
-                "Interfaz del pinout",
-                (
-                    "INTERFAZ / CONECTOR DEL PIN OUT",
-                    "Interfaz / conector del pinout"
+                st.write(
+                    "**Marca:** "
+                    + marca
                 )
-            ),
-            ("Conector del pinout", ("CONECTOR DEL PIN OUT",)),
-            ("Estado del pinout", ("ESTADO DEL PIN OUT",)),
-            (
-                "Interfaz visible",
-                ("Interfaz / conector visible",)
-            ),
-            ("Cable o adaptador", ("Cable / adaptador",))
-        ]
 
-        for etiqueta, alias in campos_conexion:
-            valor = obtener_valor(ficha, *alias)
+                st.write(
+                    "**Modelo:** "
+                    + modelo
+                )
 
-            if valor:
-                with st.container(border=True):
-                    st.markdown(f"**{etiqueta}**")
-                    st.write(valor)
-
-        st.markdown("### 💻 Software y comunicación")
-
-        campos_comunicacion = [
-            columna for columna in datos.columns
-            if any(
-                palabra in normalizar(columna)
-                for palabra in [
-                    "software",
-                    "comunicacion",
-                    "protocolo",
-                    "interfaz",
-                    "puerto",
-                    "red"
-                ]
-            )
-        ]
-
-        if campos_comunicacion:
-            for columna in campos_comunicacion:
-                valor = ficha[columna]
-
-                if pd.notna(valor) and str(valor).strip():
-                    st.markdown(f"**{columna}:**")
-                    st.write(str(valor))
-        else:
-            st.info(
-                "No hay campos de software o comunicación "
-                "identificables en este registro."
-            )
-
-        st.markdown("### 📚 Manuales y documentación")
-
-        manual = obtener_valor(
-            ficha,
-            "URL MANUAL / DOCUMENTACIÓN",
-            "Manual",
-            "Documentación",
-            "URL Manual",
-            "Enlace del manual"
-        )
-
-        mostrar_enlace_manual(manual)
-
-        st.markdown("### 📷 Foto de referencia")
-
-        foto = obtener_valor(
-            ficha,
-            "Foto de referencia",
-            "Fotografía",
-            "Foto"
-        )
-
-        if foto:
-            urls_foto = obtener_urls(foto)
-
-            if urls_foto:
-                for numero, url in enumerate(
-                    dict.fromkeys(urls_foto),
-                    start=1
-                ):
-                    st.image(
-                        url,
-                        caption=f"Referencia {numero}",
-                        width=350
+                st.write(
+                    "**Familia:** "
+                    + obtener_valor(
+                        fila,
+                        ["Familia", "Familia PLC"],
                     )
-            else:
-                st.write(foto)
-        else:
-            st.info(
-                "No hay fotografía de referencia registrada."
+                )
+
+                st.write(
+                    "**Serie / Subfamilia:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Serie / Subfamilia",
+                            "Serie",
+                            "Subfamilia",
+                        ],
+                    )
+                )
+
+                st.write(
+                    "**Clasificación:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Clasificación",
+                            "Tipo de PLC",
+                            "Tipo",
+                        ],
+                    )
+                )
+
+                st.write(
+                    "**Arquitectura:** "
+                    + obtener_valor(
+                        fila,
+                        ["Arquitectura"],
+                    )
+                )
+
+            with col2:
+                st.markdown("#### Conexión y programación")
+
+                st.write(
+                    "**Pinout:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Pin Out",
+                            "Pinout",
+                            "Pin Out / Pinout",
+                        ],
+                    )
+                )
+
+                st.write(
+                    "**Interfaz:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Interfaz",
+                            "Interfaces",
+                            "Interfaz de comunicación",
+                        ],
+                    )
+                )
+
+                st.write(
+                    "**Cable requerido:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Cable",
+                            "Cable requerido",
+                            "Cable de programación",
+                        ],
+                    )
+                )
+
+                st.write(
+                    "**Software:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Software",
+                            "Software de programación",
+                        ],
+                    )
+                )
+
+                st.write(
+                    "**Comunicación:** "
+                    + obtener_valor(
+                        fila,
+                        [
+                            "Comunicación",
+                            "Protocolos",
+                            "Red industrial",
+                            "Interfaces de comunicación",
+                        ],
+                    )
+                )
+
+            st.divider()
+
+            st.markdown("#### Manual y documentación")
+
+            manual = obtener_valor(
+                fila,
+                [
+                    "Manual",
+                    "Manual PDF",
+                    "Manual técnico",
+                    "Link manual",
+                ],
             )
 
-    elif error_excel:
-        st.error("No fue posible cargar la base de datos.")
-        st.code(error_excel)
+            mostrar_enlace_manual(
+                manual,
+                "📘 Abrir manual del fabricante",
+            )
 
-    else:
-        st.warning(
-            "Coloca base_datos.xlsx en la carpeta del proyecto."
-        )
+            st.markdown("#### Información adicional")
+
+            notas = obtener_valor(
+                fila,
+                [
+                    "Notas",
+                    "Observaciones",
+                    "Información adicional",
+                ],
+            )
+
+            st.write(notas)
+
+            with st.expander(
+                "Ver todos los datos originales del registro"
+            ):
+                st.dataframe(
+                    fila.to_frame(name="Valor"),
+                    use_container_width=True,
+                )
+
+        else:
+            st.error(
+                "No se identificaron las columnas de marca y modelo. "
+                "Revisa los encabezados del archivo Excel."
+            )
 
 
-# ==========================================
-# RECONOCIMIENTO VISUAL DEL PLC
-# ==========================================
+# ============================================================
+# RECONOCIMIENTO DEL PLC
+# ============================================================
 
 elif seccion == "Reconocimiento del PLC":
 
-    st.header("🔎 Reconocimiento visual del PLC")
+    st.subheader("🧠 Reconocimiento visual del PLC")
 
     st.write(
-        "Carga una fotografía del PLC para visualizarla "
-        "y realizar una prueba de análisis mediante YOLO. "
-        "La identificación del modelo exacto todavía requiere "
-        "un sistema de reconocimiento especializado."
+        "Carga una fotografía del equipo para realizar un análisis "
+        "visual preliminar. La identificación final debe verificarse "
+        "con la etiqueta, el modelo y la documentación técnica."
     )
 
-    st.divider()
+    st.info(
+        "El modelo YOLO genérico reconoce objetos comunes, pero "
+        "no está entrenado específicamente para identificar "
+        "fabricantes y modelos de PLC. Por eso, una detección "
+        "genérica no debe considerarse una identificación confirmada."
+    )
 
     archivo_imagen = st.file_uploader(
-        "📷 Selecciona una imagen del PLC",
+        "Selecciona una fotografía del PLC:",
         type=["jpg", "jpeg", "png", "webp"],
-        key="cargar_foto_plc"
+        key="imagen_plc",
     )
 
     if archivo_imagen is not None:
@@ -648,190 +913,207 @@ elif seccion == "Reconocimiento del PLC":
         try:
             imagen = Image.open(archivo_imagen).convert("RGB")
 
-            st.subheader("Fotografía del PLC")
-
             st.image(
                 imagen,
-                caption="Imagen cargada para reconocimiento",
-                use_container_width=True
+                caption="Imagen seleccionada",
+                use_container_width=True,
             )
-
-            st.divider()
 
             if st.button(
-                "🔍 ANALIZAR IMAGEN",
-                use_container_width=True,
-                key="analizar_plc"
+                "🔍 Analizar imagen",
+                key="analizar_plc",
             ):
 
-                try:
-                    with st.spinner(
-                        "Analizando la imagen del PLC..."
-                    ):
-                        modelo_yolo = cargar_modelo_yolo()
+                with st.spinner(
+                    "Analizando la imagen..."
+                ):
 
-                        resultados = modelo_yolo.predict(
-                            source=imagen,
-                            conf=0.25,
-                            verbose=False
+                    from ultralytics import YOLO
+
+                    @st.cache_resource
+                    def cargar_modelo_yolo():
+                        return YOLO(str(ARCHIVO_MODELO))
+
+                    modelo_yolo = cargar_modelo_yolo()
+
+                    resultados = modelo_yolo.predict(
+                        source=imagen,
+                        conf=0.40,
+                        verbose=False,
+                    )
+
+                resultado = resultados[0]
+
+                st.subheader("📊 Resultados del análisis")
+
+                nombres_clases = resultado.names
+                detecciones_plc = []
+
+                clases_validas = {
+                    "plc",
+                    "programmable logic controller",
+                    "controlador logico programable",
+                }
+
+                if resultado.boxes is not None:
+                    for caja in resultado.boxes:
+                        clase_id = int(caja.cls[0].item())
+
+                        nombre_clase = normalizar(
+                            nombres_clases[clase_id]
                         )
 
-                        resultado = resultados[0]
+                        confianza = (
+                            float(caja.conf[0].item()) * 100
+                        )
 
-st.subheader("📊 Resultados del análisis")
+                        if nombre_clase in clases_validas:
+                            detecciones_plc.append(
+                                (nombre_clase, confianza)
+                            )
 
-# Solo aceptar clases que identifiquen explícitamente un PLC
-clases_plc = (
-    "plc",
-    "programmable logic controller",
-    "controlador lógico programable",
-)
+                if detecciones_plc:
+                    for nombre, confianza in detecciones_plc:
+                        st.success(
+                            "Se detectó una clase compatible con PLC."
+                        )
 
-coincidencias_plc = []
+                        st.write(
+                            f"**Clase detectada:** {nombre}"
+                        )
 
-if resultado.boxes is not None:
-    for caja in resultado.boxes:
-        clase = int(caja.cls[0].item())
-        confianza = float(caja.conf[0].item()) * 100
-        nombre_clase = str(resultado.names[clase])
+                        st.write(
+                            f"**Confianza:** {confianza:.2f}%"
+                        )
 
-        if any(
-            termino in nombre_clase.lower()
-            for termino in clases_plc
-        ):
-            coincidencias_plc.append(
-                (nombre_clase, confianza)
-            )
-
-if coincidencias_plc:
-    st.success("Se detectó una clase compatible con PLC.")
-
-    for nombre_clase, confianza in coincidencias_plc:
-        st.write(f"**Clase detectada:** {nombre_clase}")
-        st.write(f"**Confianza:** {confianza:.1f}%")
-
-    st.info(
-        "La detección no confirma por sí sola la marca "
-        "ni el modelo exacto del equipo."
-    )
-else:
-    st.warning(
-        "No se pudo confirmar que el objeto sea un PLC."
-    )
-
-    st.write(
-        "El modelo actual no reconoce una clase específica "
-        "de PLC en esta imagen. No se mostrará un celular, "
-        "refrigerador u otro objeto como identificación válida."
-    )
-
-    st.info(
-        "Para identificar PLC reales necesitaremos integrar "
-        "un modelo especializado y validarlo con fotografías "
-        "de controladores industriales."
-    )
-                except Exception as error:
-                    st.error(
-                        "No fue posible analizar la imagen. "
-                        "Revisa el modelo YOLO y las dependencias."
+                    st.warning(
+                        "Verifica el fabricante y modelo mediante "
+                        "la etiqueta del equipo y la base de datos."
                     )
-                    st.code(str(error))
+
+                else:
+                    st.warning(
+                        "No se pudo confirmar que el objeto sea un PLC."
+                    )
+
+                    st.write(
+                        "El modelo genérico no encontró una clase "
+                        "específica de PLC. Esto no significa que "
+                        "la fotografía no contenga un PLC."
+                    )
+
+                    st.info(
+                        "Para reconocer PLC de manera confiable, "
+                        "el siguiente paso será entrenar un modelo "
+                        "con fotografías etiquetadas de los equipos "
+                        "que contiene la base de datos."
+                    )
+
+                st.caption(
+                    "Las detecciones de objetos genéricos no se "
+                    "presentan como identificaciones confirmadas."
+                )
 
         except Exception as error:
-            st.error("No fue posible abrir la imagen.")
+            st.error(
+                "Ocurrió un error al analizar la imagen."
+            )
             st.code(str(error))
 
-    else:
-        st.info(
-            "Selecciona una fotografía para comenzar. "
-            "Después podrás visualizarla y analizarla."
-        )
 
-
-# ==========================================
-# COMUNICACION INDUSTRIAL
-# ==========================================
+# ============================================================
+# COMUNICACIÓN INDUSTRIAL
+# ============================================================
 
 elif seccion == "Comunicación industrial":
 
-    st.header("Comunicación industrial")
+    st.subheader("🔌 Comunicación industrial")
 
     st.write(
-        "Consulta protocolos e interfaces utilizados "
-        "por los controladores lógicos programables."
+        "Consulta información introductoria sobre interfaces "
+        "y redes utilizadas en automatización industrial."
     )
 
     with st.expander("RS-485"):
         st.write(
-            "Interfaz eléctrica diferencial utilizada en "
-            "comunicaciones industriales. Puede emplearse con "
-            "protocolos como Modbus RTU, según el equipo."
+            "Interfaz eléctrica diferencial utilizada para "
+            "transmisión de datos en entornos industriales. "
+            "Puede emplearse con protocolos como Modbus RTU, "
+            "según el equipo y su configuración."
+        )
+
+        st.write(
+            "**Consideraciones:** verificar el pinout, la "
+            "polaridad de las líneas, la referencia eléctrica, "
+            "la velocidad de comunicación y la terminación "
+            "cuando corresponda."
         )
 
     with st.expander("Ethernet industrial"):
         st.write(
-            "Permite la comunicación mediante redes Ethernet. "
-            "El protocolo y los parámetros dependen del fabricante "
-            "y del modelo del PLC."
+            "Permite la comunicación mediante redes basadas "
+            "en Ethernet. El conector físico por sí solo no "
+            "determina el protocolo compatible."
+        )
+
+        st.write(
+            "**Consideraciones:** comprobar el protocolo, "
+            "la dirección IP, los parámetros de red y el "
+            "software requerido por el fabricante."
         )
 
     with st.expander("PROFIBUS"):
         st.write(
-            "Red industrial utilizada para intercambiar datos "
-            "entre controladores y dispositivos compatibles."
+            "Red de comunicación industrial utilizada para "
+            "intercambio de datos entre controladores y "
+            "dispositivos de campo."
         )
 
-    with st.expander("USB y puertos de programación"):
         st.write(
-            "Algunos PLC utilizan USB u otras interfaces dedicadas "
-            "para programación y diagnóstico. Se debe verificar "
-            "el modelo y el cable requerido."
+            "**Consideraciones:** identificar la variante "
+            "de PROFIBUS, el conector, el cableado y la "
+            "configuración de red existente."
         )
 
-    st.divider()
-    st.markdown("### Datos de comunicación de tu base de datos")
+    with st.expander("USB"):
+        st.write(
+            "Puede utilizarse para programación, diagnóstico "
+            "o configuración, dependiendo del modelo de PLC."
+        )
 
-    if datos is not None and not datos.empty:
+        st.write(
+            "**Consideraciones:** confirmar el tipo de puerto, "
+            "el cable o interfaz requerido y los controladores "
+            "de software necesarios."
+        )
 
-        columnas_com = [
-            columna for columna in datos.columns
-            if any(
-                palabra in normalizar(columna)
-                for palabra in [
-                    "comunicacion",
-                    "protocolo",
-                    "interfaz",
-                    "red",
-                    "puerto"
-                ]
-            )
-        ]
+    with st.expander("Pinout e interfaces"):
+        st.write(
+            "El pinout describe la asignación de señales en "
+            "un conector. Debe verificarse en el manual del "
+            "modelo específico antes de conectar un equipo."
+        )
 
-        if columnas_com:
-            st.dataframe(
-                datos[columnas_com],
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.info(
-                "Tu Excel todavía no contiene columnas "
-                "identificables de comunicación o interfaz."
-            )
-
-    else:
-        st.info(
-            "Cuando cargues la base de datos, aquí aparecerán "
-            "los datos de comunicación que contenga."
+        st.warning(
+            "No selecciones un cable únicamente por la forma "
+            "del conector. Dos conectores físicamente iguales "
+            "pueden tener asignaciones de pines diferentes."
         )
 
 
-# ==========================================
-# PIE DE PAGINA
-# ==========================================
+# ============================================================
+# PIE DE PÁGINA
+# ============================================================
 
 st.divider()
 
-st.caption(
-    "PLC SCAN | Automatización Industrial | DJH"
+st.markdown(
+    """
+    <div style="text-align:center; color:#AFC8E2; padding:10px;">
+        PLC SCAN | Automatización Industrial | DJH
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
+
+
