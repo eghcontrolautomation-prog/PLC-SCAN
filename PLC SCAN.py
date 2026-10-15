@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-ARCHIVO_EXCEL = BASE_DIR / "base_datos.xlsx"
+ARCHIVO_EXCEL = BASE_DIR / "base_datos.xlsx.xlsx"
 ARCHIVO_MODELO = BASE_DIR / "yolo26n.pt"
 
 # ============================================================
