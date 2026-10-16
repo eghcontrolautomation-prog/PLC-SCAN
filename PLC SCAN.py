@@ -896,17 +896,16 @@ elif seccion == "Ficha técnica":
 elif seccion == "Reconocimiento del PLC":
 
     import pytesseract
-    try:
+    import unicodedata
+    from difflib import SequenceMatcher
+    from PIL import ImageEnhance, ImageFilter, ImageOps
+   try:
     if not os.path.isfile(RUTA_TESSERACT):
         st.error(
             "Tesseract no está instalado en el servidor. "
             "Verifica packages.txt y los registros de Streamlit Cloud."
         )
         st.stop()
-    import unicodedata
-    from difflib import SequenceMatcher
-    from PIL import ImageEnhance, ImageFilter, ImageOps
-   
 
     st.subheader("🧠 Reconocimiento visual del PLC")
 
