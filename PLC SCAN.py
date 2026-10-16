@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from pathlib import Path
@@ -7,6 +6,14 @@ import unicodedata
 from urllib.parse import urlparse
 from PIL import Image
 from functools import lru_cache
+import pytesseract
+import os
+
+# Configurar la ruta del ejecutable Tesseract
+RUTA_TESSERACT = "/usr/bin/tesseract"
+
+if os.path.isfile(RUTA_TESSERACT):
+    pytesseract.pytesseract.tesseract_cmd = RUTA_TESSERACT
 
 # ============================================================
 # CONFIGURACIÓN GENERAL
@@ -888,10 +895,18 @@ elif seccion == "Ficha técnica":
 
 elif seccion == "Reconocimiento del PLC":
 
-    import re
+    import pytesseract
+    try:
+    if not os.path.isfile(RUTA_TESSERACT):
+        st.error(
+            "Tesseract no está instalado en el servidor. "
+            "Verifica packages.txt y los registros de Streamlit Cloud."
+        )
+        st.stop()
     import unicodedata
     from difflib import SequenceMatcher
     from PIL import ImageEnhance, ImageFilter, ImageOps
+   
 
     st.subheader("🧠 Reconocimiento visual del PLC")
 
