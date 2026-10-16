@@ -885,21 +885,26 @@ elif seccion == "Ficha técnica":
 # RECONOCIMIENTO DEL PLC
 # ============================================================
 
+
 elif seccion == "Reconocimiento del PLC":
+
+    import re
+    import unicodedata
+    from difflib import SequenceMatcher
+    from PIL import ImageEnhance, ImageFilter, ImageOps
 
     st.subheader("🧠 Reconocimiento visual del PLC")
 
     st.write(
-        "Carga una fotografía del equipo para realizar un análisis "
-        "visual preliminar. La identificación final debe verificarse "
-        "con la etiqueta, el modelo y la documentación técnica."
+        "Carga una fotografía del equipo para mejorar la imagen, "
+        "leer el texto de la etiqueta y buscar posibles coincidencias "
+        "en la base de datos de PLC SCAN."
     )
 
     st.info(
-        "El modelo YOLO genérico reconoce objetos comunes, pero "
-        "no está entrenado específicamente para identificar "
-        "fabricantes y modelos de PLC. Por eso, una detección "
-        "genérica no debe considerarse una identificación confirmada."
+        "La identificación se basa en el texto visible de la etiqueta. "
+        "Si la fotografía está demasiado borrosa, puede ser necesario "
+        "tomar otra imagen o confirmar manualmente el modelo."
     )
 
     archivo_imagen = st.file_uploader(
@@ -908,117 +913,259 @@ elif seccion == "Reconocimiento del PLC":
         key="imagen_plc",
     )
 
+    def normalizar_ocr(texto):
+        texto = str(texto).lower().strip()
+        texto = unicodedata.normalize("NFKD", texto)
+        texto = "".join(
+            caracter for caracter in texto
+            if not unicodedata.combining(caracter)
+        )
+        return re.sub(r"[^a-z0-9]", "", texto)
+
     if archivo_imagen is not None:
 
-        try:
-            imagen = Image.open(archivo_imagen).convert("RGB")
+        imagen = Image.open(archivo_imagen).convert("RGB")
 
-            st.image(
-                imagen,
-                caption="Imagen seleccionada",
-                use_container_width=True,
-            )
+        st.image(
+            imagen,
+            caption="Fotografía original",
+            use_container_width=True,
+        )
 
-            if st.button(
-                "🔍 Analizar imagen",
-                key="analizar_plc",
+        if st.button(
+            "🔍 Mejorar imagen y buscar PLC",
+            key="analizar_plc",
+        ):
+
+            with st.spinner(
+                "Mejorando la fotografía y leyendo la etiqueta..."
             ):
 
-                with st.spinner(
-                    "Analizando la imagen..."
-                ):
+                try:
+                    import pytesseract
 
-                    from ultralytics import YOLO
+                    # Aumentar el tamaño de la imagen
+                    ancho, alto = imagen.size
+                    factor = max(2, min(4, 1600 // max(ancho, 1)))
 
-                    @st.cache_resource
-                    def cargar_modelo_yolo():
-                        return YOLO(str(ARCHIVO_MODELO))
-
-                    modelo_yolo = cargar_modelo_yolo()
-
-                    resultados = modelo_yolo.predict(
-                        source=imagen,
-                        conf=0.40,
-                        verbose=False,
+                    imagen_mejorada = imagen.resize(
+                        (ancho * factor, alto * factor)
                     )
 
-                resultado = resultados[0]
+                    # Mejorar contraste y nitidez
+                    imagen_mejorada = ImageOps.autocontrast(
+                        imagen_mejorada
+                    )
 
-                st.subheader("📊 Resultados del análisis")
+                    imagen_mejorada = ImageEnhance.Contrast(
+                        imagen_mejorada
+                    ).enhance(1.6)
 
-                nombres_clases = resultado.names
-                detecciones_plc = []
+                    imagen_mejorada = ImageEnhance.Sharpness(
+                        imagen_mejorada
+                    ).enhance(2.0)
 
-                clases_validas = {
-                    "plc",
-                    "programmable logic controller",
-                    "controlador logico programable",
-                }
+                    imagen_mejorada = imagen_mejorada.filter(
+                        ImageFilter.UnsharpMask(
+                            radius=2,
+                            percent=150,
+                            threshold=3,
+                        )
+                    )
 
-                if resultado.boxes is not None:
-                    for caja in resultado.boxes:
-                        clase_id = int(caja.cls[0].item())
+                    st.image(
+                        imagen_mejorada,
+                        caption="Fotografía mejorada para lectura",
+                        use_container_width=True,
+                    )
 
-                        nombre_clase = normalizar(
-                            nombres_clases[clase_id]
+                    # Leer el texto de la etiqueta
+                    texto_detectado = pytesseract.image_to_string(
+                        imagen_mejorada,
+                        config="--psm 11",
+                    )
+
+                    st.subheader("📝 Texto leído de la etiqueta")
+
+                    if texto_detectado.strip():
+                        st.text_area(
+                            "Revisa el texto detectado:",
+                            value=texto_detectado,
+                            height=150,
+                            key="texto_ocr_plc",
+                        )
+                    else:
+                        st.warning(
+                            "No se pudo leer texto suficiente. "
+                            "Intenta tomar una fotografía más cercana, "
+                            "con buena iluminación y enfocada en la etiqueta."
                         )
 
-                        confianza = (
-                            float(caja.conf[0].item()) * 100
+                    # Buscar coincidencias en el Excel
+                    if texto_detectado.strip():
+
+                        texto_ocr = normalizar_ocr(
+                            texto_detectado
                         )
 
-                        if nombre_clase in clases_validas:
-                            detecciones_plc.append(
-                                (nombre_clase, confianza)
+                        if "df" not in globals() or df.empty:
+                            st.error(
+                                "No se encontró una base de datos "
+                                "disponible para realizar la búsqueda."
                             )
 
-                if detecciones_plc:
-                    for nombre, confianza in detecciones_plc:
-                        st.success(
-                            "Se detectó una clase compatible con PLC."
-                        )
+                        else:
+                            candidatos = []
 
-                        st.write(
-                            f"**Clase detectada:** {nombre}"
-                        )
+                            for _, fila in df.iterrows():
 
-                        st.write(
-                            f"**Confianza:** {confianza:.2f}%"
-                        )
+                                valores = {
+                                    str(columna): str(valor)
+                                    for columna, valor in fila.items()
+                                    if valor is not None
+                                    and str(valor).strip().lower()
+                                    not in ("", "nan", "none")
+                                }
 
-                    st.warning(
-                        "Verifica el fabricante y modelo mediante "
-                        "la etiqueta del equipo y la base de datos."
+                                # Buscar coincidencias por celda
+                                mejor_puntaje = 0
+                                coincidencias = []
+
+                                for columna, valor in valores.items():
+
+                                    valor_norm = normalizar_ocr(valor)
+
+                                    if len(valor_norm) < 3:
+                                        continue
+
+                                    if valor_norm in texto_ocr:
+                                        puntaje = 100
+                                    else:
+                                        palabras = re.findall(
+                                            r"[A-Za-z0-9][A-Za-z0-9._/-]*",
+                                            texto_detectado,
+                                        )
+
+                                        palabras_norm = [
+                                            normalizar_ocr(p)
+                                            for p in palabras
+                                        ]
+
+                                        puntaje = 0
+
+                                        for palabra in palabras_norm:
+                                            if len(palabra) < 3:
+                                                continue
+
+                                            similitud = (
+                                                SequenceMatcher(
+                                                    None,
+                                                    valor_norm,
+                                                    palabra,
+                                                ).ratio() * 100
+                                            )
+
+                                            puntaje = max(
+                                                puntaje,
+                                                similitud,
+                                            )
+
+                                    if puntaje >= 75:
+                                        coincidencias.append(
+                                            (columna, valor, puntaje)
+                                        )
+
+                                    mejor_puntaje = max(
+                                        mejor_puntaje,
+                                        puntaje,
+                                    )
+
+                                if mejor_puntaje >= 65:
+                                    candidatos.append(
+                                        (
+                                            mejor_puntaje,
+                                            valores,
+                                            coincidencias,
+                                        )
+                                    )
+
+                            candidatos.sort(
+                                key=lambda elemento: elemento[0],
+                                reverse=True,
+                            )
+
+                            st.subheader(
+                                "📋 Posibles coincidencias en la base de datos"
+                            )
+
+                            if candidatos:
+
+                                for numero, (
+                                    puntaje,
+                                    valores,
+                                    coincidencias,
+                                ) in enumerate(candidatos[:5], start=1):
+
+                                    with st.expander(
+                                        f"Posible coincidencia {numero}",
+                                        expanded=(numero == 1),
+                                    ):
+
+                                        # Mostrar los campos principales
+                                        for columna, valor in valores.items():
+                                            encabezado = normalizar_ocr(
+                                                columna
+                                            )
+
+                                            if any(
+                                                palabra in encabezado
+                                                for palabra in [
+                                                    "marca",
+                                                    "fabricante",
+                                                    "modelo",
+                                                    "nombre",
+                                                    "tipo",
+                                                ]
+                                            ):
+                                                st.write(
+                                                    f"**{columna}:** {valor}"
+                                                )
+
+                                        if coincidencias:
+                                            st.write(
+                                                "**Datos que coincidieron "
+                                                "con la etiqueta:**"
+                                            )
+
+                                            for columna, valor, similitud in (
+                                                coincidencias[:5]
+                                            ):
+                                                st.write(
+                                                    f"- {columna}: {valor}"
+                                                )
+
+                                st.warning(
+                                    "Estas son coincidencias preliminares, "
+                                    "no una identificación confirmada. "
+                                    "Verifica el modelo en la etiqueta física."
+                                )
+
+                            else:
+                                st.warning(
+                                    "No se encontraron coincidencias claras "
+                                    "en el Excel. Revisa el texto detectado "
+                                    "o intenta con una fotografía más nítida."
+                                )
+
+                except Exception as error:
+                    st.error(
+                        "No se pudo completar el reconocimiento."
                     )
-
-                else:
-                    st.warning(
-                        "No se pudo confirmar que el objeto sea un PLC."
-                    )
-
-                    st.write(
-                        "El modelo genérico no encontró una clase "
-                        "específica de PLC. Esto no significa que "
-                        "la fotografía no contenga un PLC."
-                    )
-
+                    st.code(str(error))
                     st.info(
-                        "Para reconocer PLC de manera confiable, "
-                        "el siguiente paso será entrenar un modelo "
-                        "con fotografías etiquetadas de los equipos "
-                        "que contiene la base de datos."
+                        "Comprueba que las dependencias de OCR estén "
+                        "instaladas en la aplicación publicada."
                     )
-
-                st.caption(
-                    "Las detecciones de objetos genéricos no se "
-                    "presentan como identificaciones confirmadas."
-                )
-
-        except Exception as error:
-            st.error(
-                "Ocurrió un error al analizar la imagen."
-            )
-            st.code(str(error))
 
 
 # ============================================================
