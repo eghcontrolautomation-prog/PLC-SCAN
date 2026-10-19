@@ -10,6 +10,15 @@ import streamlit as st
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
+import shutil
+import os
+
+st.write("Diagnóstico de Tesseract")
+st.write("Ruta detectada:", shutil.which("tesseract"))
+st.write("Existe /usr/bin/tesseract:",
+         os.path.isfile("/usr/bin/tesseract"))
+
+
 
 # ============================================================
 # CONFIGURACIÓN GENERAL
