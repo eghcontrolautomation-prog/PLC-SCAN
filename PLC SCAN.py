@@ -7,56 +7,56 @@ from difflib import SequenceMatcher
 
 import pandas as pd
 import streamlit as st
-import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-import shutil
-import os
+# Tesseract es opcional para que la aplicación pueda abrirse.
+try:
+    import pytesseract
+    PYTESSERACT_DISPONIBLE = True
+except ImportError:
+    pytesseract = None
+    PYTESSERACT_DISPONIBLE = False
 
-st.write("Diagnóstico de Tesseract")
-st.write("Ruta detectada:", shutil.which("tesseract"))
-st.write("Existe /usr/bin/tesseract:",
-         os.path.isfile("/usr/bin/tesseract"))
 
+# ==========================================================
+# CONFIGURACIÓN
+# ==========================================================
 
-
-# ============================================================
-# CONFIGURACIÓN GENERAL
-# ============================================================
+CARPETA_PROYECTO = Path(__file__).resolve().parent
+ARCHIVO_EXCEL = CARPETA_PROYECTO / "base de datos 2.xlsx"
 
 st.set_page_config(
-    page_title="PLC SCAN | Automatización Industrial",
+    page_title="PLC SCAN",
     page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-ARCHIVO_EXCEL = BASE_DIR / "base_datos.xlsx.xlsx"
 
-# Ruta habitual de Tesseract en Streamlit Cloud (Linux).
-RUTA_TESSERACT = "/usr/bin/tesseract"
+# ==========================================================
+# DISEÑO
+# ==========================================================
 
-if os.path.isfile(RUTA_TESSERACT):
-    pytesseract.pytesseract.tesseract_cmd = RUTA_TESSERACT
-
-
-# ============================================================
-# DISEÑO VISUAL
-# ============================================================
 
 st.markdown(
     """
     <style>
+    /* ========================================
+       FONDO PRINCIPAL
+    ======================================== */
     .stApp {
         background: linear-gradient(
             135deg,
-            rgba(5, 16, 39, 0.98),
-            rgba(10, 38, 75, 0.96)
+            #061329,
+            #0A2D50,
+            #07182E
         );
         color: #F2F6FC;
     }
 
+    /* ========================================
+       BARRA LATERAL
+    ======================================== */
     [data-testid="stSidebar"] {
         background: #071426;
         border-right: 1px solid #1C426B;
@@ -66,6 +66,9 @@ st.markdown(
         color: #F2F6FC;
     }
 
+    /* ========================================
+       TÍTULOS Y TEXTO
+    ======================================== */
     h1, h2, h3 {
         color: #66C7FF !important;
     }
@@ -74,6 +77,9 @@ st.markdown(
         color: #E4ECF7;
     }
 
+    /* ========================================
+       MÉTRICAS
+    ======================================== */
     div[data-testid="stMetric"] {
         background: rgba(17, 49, 82, 0.75);
         border: 1px solid #28618D;
@@ -81,144 +87,252 @@ st.markdown(
         border-radius: 12px;
     }
 
+    /* ========================================
+       BOTONES
+    ======================================== */
     div.stButton > button {
         background-color: #087FC1;
         color: white;
-        border: none;
+        border: 1px solid #28618D;
         border-radius: 8px;
         font-weight: bold;
-        padding: 0.55rem 1rem;
+        transition: 0.3s;
     }
 
     div.stButton > button:hover {
         background-color: #119EEB;
         color: white;
-        border: 1px solid #7ED2FF;
+        border-color: #66C7FF;
     }
 
+    /* ========================================
+       EXPANSORES
+    ======================================== */
     div[data-testid="stExpander"] {
         border: 1px solid #28577E;
         border-radius: 10px;
+        background: rgba(9, 35, 65, 0.30);
     }
 
-    .djh-watermark {
-        position: fixed;
-        right: 25px;
-        bottom: 12px;
-        font-size: 45px;
-        font-weight: 900;
-        color: rgba(120, 190, 255, 0.10);
-        letter-spacing: 5px;
-        z-index: 0;
-        pointer-events: none;
-    }
-
+    /* ========================================
+       ENCABEZADO PLC SCAN
+    ======================================== */
     .plc-header {
-        padding: 22px;
-        border: 1px solid #245581;
-        border-radius: 15px;
+        position: relative;
+        text-align: center;
+        padding: 30px 22px;
+        border: 1px solid rgba(102, 199, 255, 0.40);
+        border-radius: 18px;
         background: linear-gradient(
             120deg,
-            rgba(9, 35, 65, 0.95),
-            rgba(14, 69, 109, 0.80)
+            rgba(9, 35, 65, 0.96),
+            rgba(14, 69, 109, 0.88)
         );
-        margin-bottom: 20px;
+        margin-bottom: 25px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.25);
     }
 
+    .plc-header h1 {
+        color: #66D5FF !important;
+        font-size: 42px;
+        font-weight: 900;
+        letter-spacing: 4px;
+        margin-bottom: 14px;
+    }
+
+    /* ========================================
+       DESCRIPCIÓN DEL PROYECTO
+    ======================================== */
     .plc-subtitle {
-        color: #B8D9F2;
+        color: #D4E9FA !important;
         font-size: 16px;
+        line-height: 1.8;
+        max-width: 800px;
+        margin: 0 auto;
     }
 
+    /* ========================================
+       TARJETAS DE INFORMACIÓN
+    ======================================== */
     .info-card {
         background: rgba(13, 42, 72, 0.82);
         border: 1px solid #245581;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 10px;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 12px;
+    }
+
+    /* ========================================
+       MARCA DE AGUA GRANDE EN EL CENTRO
+    ======================================== */
+    .stApp::before {
+        content: "DJH";
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: max-content;
+        font-size: clamp(120px, 22vw, 280px);
+        font-weight: 900;
+        letter-spacing: 12px;
+        color: rgba(120, 190, 255, 0.07);
+        pointer-events: none;
+        user-select: none;
+        z-index: 0;
+        white-space: nowrap;
+    }
+
+    /* ========================================
+       MARCA DE AGUA PEQUEÑA EN LA ESQUINA
+    ======================================== */
+    .stApp::after {
+        content: "DJH";
+        position: fixed;
+        right: 22px;
+        bottom: 15px;
+        font-size: 22px;
+        font-weight: 900;
+        letter-spacing: 4px;
+        color: rgba(160, 215, 255, 0.35);
+        pointer-events: none;
+        user-select: none;
+        z-index: 999;
+        white-space: nowrap;
+    }
+
+    /* ========================================
+       AJUSTES PARA CELULARES
+    ======================================== */
+    @media (max-width: 768px) {
+        .plc-header {
+            padding: 22px 14px;
+        }
+
+        .plc-header h1 {
+            font-size: 32px;
+        }
+
+        .plc-subtitle {
+            font-size: 14px;
+        }
+
+        .stApp::before {
+            font-size: 100px;
+            letter-spacing: 5px;
+        }
+
+        .stApp::after {
+            right: 12px;
+            bottom: 10px;
+            font-size: 17px;
+        }
     }
     </style>
-
-    <div class="djh-watermark">DJH</div>
     """,
     unsafe_allow_html=True,
 )
 
 
-# ============================================================
+
+# ==========================================================
 # FUNCIONES GENERALES
-# ============================================================
+# ==========================================================
 
 def normalizar(valor):
-    """Normaliza texto para búsquedas y comparación de columnas."""
+    """Normaliza texto para facilitar las búsquedas."""
+
     if pd.isna(valor):
         return ""
 
     texto = str(valor).strip().lower()
+
     texto = unicodedata.normalize("NFD", texto)
+
     texto = "".join(
         caracter
         for caracter in texto
         if unicodedata.category(caracter) != "Mn"
     )
+
     texto = re.sub(r"[^a-z0-9]+", " ", texto)
 
     return " ".join(texto.split())
 
 
+def normalizar_ocr(texto):
+    """Normaliza texto obtenido de una fotografía."""
+
+    texto = str(texto).lower().strip()
+
+    texto = unicodedata.normalize("NFKD", texto)
+
+    texto = "".join(
+        caracter
+        for caracter in texto
+        if not unicodedata.combining(caracter)
+    )
+
+    return re.sub(r"[^a-z0-9]", "", texto)
+
+
 def valor_texto(valor):
-    """Convierte valores vacíos de Excel en texto legible."""
+    """Evita mostrar NaN y celdas vacías."""
+
     if pd.isna(valor):
         return "No disponible"
 
     texto = str(valor).strip()
 
-    if not texto or texto.lower() in ("nan", "none", "null"):
+    if texto.lower() in ("", "nan", "none", "null"):
         return "No disponible"
 
     return texto
 
 
-def buscar_columna(df, posibles_nombres):
-    """Encuentra una columna por nombres exactos o aproximados."""
+def buscar_columna(df, nombres):
+    """Localiza una columna usando posibles nombres."""
+
     columnas = {
         normalizar(columna): columna
         for columna in df.columns
     }
 
-    for nombre in posibles_nombres:
+    for nombre in nombres:
         clave = normalizar(nombre)
 
         if clave in columnas:
             return columnas[clave]
 
-    for nombre in posibles_nombres:
+    for nombre in nombres:
         clave = normalizar(nombre)
 
         for clave_columna, columna_original in columnas.items():
+
             if clave and clave in clave_columna:
                 return columna_original
 
     return None
 
 
-def obtener_valor(fila, posibles_nombres):
-    """Obtiene un dato de una fila usando diferentes encabezados."""
+def obtener_valor(fila, nombres):
+    """Obtiene el valor de una fila aunque cambie el encabezado."""
+
     columnas = {
         normalizar(columna): columna
         for columna in fila.index
     }
 
-    for nombre in posibles_nombres:
+    for nombre in nombres:
         clave = normalizar(nombre)
 
         if clave in columnas:
             return valor_texto(fila[columnas[clave]])
 
-    for nombre in posibles_nombres:
+    for nombre in nombres:
         clave = normalizar(nombre)
 
         for clave_columna, columna_original in columnas.items():
+
             if clave and clave in clave_columna:
                 return valor_texto(fila[columna_original])
 
@@ -226,32 +340,39 @@ def obtener_valor(fila, posibles_nombres):
 
 
 def es_url(valor):
-    """Comprueba si un texto contiene una dirección web válida."""
+    """Comprueba si el texto es una dirección web válida."""
+
     if not valor or valor == "No disponible":
         return False
 
     try:
         resultado = urlparse(valor)
+
         return (
             resultado.scheme in ("http", "https")
             and bool(resultado.netloc)
         )
+
     except Exception:
         return False
 
 
-def mostrar_enlace_manual(valor, texto="Abrir recurso"):
-    """Muestra un enlace si el dato de Excel es una URL."""
+def mostrar_manual(valor, texto="Abrir manual"):
+    """Muestra el manual si existe una URL."""
+
     if valor == "No disponible":
-        st.caption("No hay un recurso registrado.")
+        st.caption("No hay un manual registrado.")
+
     elif es_url(valor):
         st.markdown(f"[{texto}]({valor})")
+
     else:
         st.write(valor)
 
 
 def buscar_coincidencias(df, consulta):
-    """Busca PLC por marca, modelo, familia, serie y comunicación."""
+    """Busca coincidencias en las columnas principales."""
+
     consulta_normalizada = normalizar(consulta)
 
     if not consulta_normalizada:
@@ -263,16 +384,18 @@ def buscar_coincidencias(df, consulta):
         buscar_columna(df, ["Familia", "Familia PLC"]),
         buscar_columna(
             df,
-            ["Serie / Subfamilia", "Serie", "Subfamilia"],
+            ["Serie / Subfamilia", "Serie", "Subfamilia"]
         ),
         buscar_columna(
             df,
-            ["Clasificación", "Tipo de PLC", "Tipo"],
+            ["Clasificación", "Tipo de PLC", "Tipo"]
         ),
+        buscar_columna(df, ["Arquitectura"]),
         buscar_columna(
             df,
-            ["Arquitectura", "Interfaz", "Comunicación"],
+            ["Interfaz / conector visible", "Interfaz"]
         ),
+        buscar_columna(df, ["Software"]),
     ]
 
     columnas = [
@@ -287,56 +410,54 @@ def buscar_coincidencias(df, consulta):
     mascara = pd.Series(False, index=df.index)
 
     for columna in columnas:
-        mascara |= (
+
+        valores = (
             df[columna]
             .fillna("")
             .astype(str)
             .map(normalizar)
-            .str.contains(
-                re.escape(consulta_normalizada),
-                regex=True,
-                na=False,
-            )
+        )
+
+        mascara |= valores.str.contains(
+            re.escape(consulta_normalizada),
+            regex=True,
+            na=False
         )
 
     return df[mascara].copy()
 
 
-def normalizar_ocr(texto):
-    """Prepara texto leído por OCR para comparar modelos."""
-    texto = str(texto).lower().strip()
-    texto = unicodedata.normalize("NFKD", texto)
-
-    texto = "".join(
-        caracter
-        for caracter in texto
-        if not unicodedata.combining(caracter)
-    )
-
-    return re.sub(r"[^a-z0-9]", "", texto)
-
-
-# ============================================================
-# CARGA DE BASE DE DATOS
-# ============================================================
+# ==========================================================
+# CARGA DEL EXCEL
+# ==========================================================
 
 @st.cache_data
 def cargar_base_datos(ruta_archivo, fecha_modificacion):
-    """Carga el Excel y conserva sus columnas originales."""
+    """Carga los registros de la primera hoja del Excel."""
+
     return pd.read_excel(ruta_archivo)
 
 
 if not ARCHIVO_EXCEL.exists():
+
     st.error(
-        "No se encontró el archivo base_datos.xlsx.xlsx. "
-        "Colócalo junto al archivo PLC SCAN.py y verifica su nombre."
+        f"No se encontró el archivo: {ARCHIVO_EXCEL.name}"
     )
+
+    st.info(
+        "Coloca el archivo Excel junto a PLC SCAN.py y "
+        "verifica que su nombre sea exactamente "
+        "'base de datos 2.xlsx'."
+    )
+
     st.stop()
 
+
 try:
+
     df = cargar_base_datos(
         str(ARCHIVO_EXCEL),
-        ARCHIVO_EXCEL.stat().st_mtime,
+        ARCHIVO_EXCEL.stat().st_mtime
     )
 
     df.columns = [
@@ -347,41 +468,47 @@ try:
     df = df.dropna(how="all")
 
 except Exception as error:
+
     st.error("No se pudo cargar la base de datos de Excel.")
+
     st.code(str(error))
+
     st.stop()
 
-
-# ============================================================
+# ==========================================================
 # ENCABEZADO
-# ============================================================
+# ==========================================================
+
+# ==========================================================
+# ENCABEZADO PLC SCAN
+# ==========================================================
 
 st.markdown(
     """
     <div class="plc-header">
         <h1>⚙️ PLC SCAN</h1>
-        <div class="plc-subtitle">
-            Identificación técnica de controladores lógicos
-            programables y consulta de interfaces de comunicación.
-        </div>
+        <p class="plc-subtitle">
+            Identificación inteligente de controladores PLC
+            y consulta de información técnica para
+            programación, diagnóstico y mantenimiento industrial.
+        </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
+# ==========================================================
 # MENÚ LATERAL
-# ============================================================
+# ==========================================================
 
 st.sidebar.title("⚙️ PLC SCAN")
+
 st.sidebar.caption("Automatización Industrial")
 
 seccion = st.sidebar.radio(
     "Selecciona una sección:",
     [
         "Inicio",
-        "Base de datos",
         "Buscar PLC",
         "Ficha técnica",
         "Reconocimiento del PLC",
@@ -397,58 +524,49 @@ st.sidebar.caption(
 )
 
 
-# ============================================================
+# ==========================================================
 # INICIO
-# ============================================================
+# ==========================================================
 
 if seccion == "Inicio":
 
     st.subheader("Panel principal")
 
     st.write(
-        "PLC SCAN es una herramienta de consulta técnica diseñada "
-        "para facilitar la identificación de controladores lógicos "
-        "programables y la revisión de sus características."
+        "PLC SCAN es una herramienta de consulta técnica "
+        "diseñada para facilitar la identificación de "
+        "controladores lógicos programables y la revisión "
+        "de sus características."
     )
-
-    total_registros = len(df)
 
     columna_marca = buscar_columna(
         df,
-        ["Marca", "Fabricante"],
+        ["Marca", "Fabricante"]
     )
-
-    if columna_marca:
-        total_marcas = (
-            df[columna_marca]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .nunique()
-        )
-    else:
-        total_marcas = 0
 
     columna_modelo = buscar_columna(
         df,
-        ["Modelo exacto", "Modelo"],
+        ["Modelo exacto", "Modelo"]
     )
 
-    if columna_modelo:
-        total_modelos = (
-            df[columna_modelo]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .nunique()
-        )
-    else:
-        total_modelos = 0
+    total_marcas = (
+        df[columna_marca].dropna().nunique()
+        if columna_marca
+        else 0
+    )
+
+    total_modelos = (
+        df[columna_modelo].dropna().nunique()
+        if columna_modelo
+        else 0
+    )
 
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Registros disponibles", total_registros)
+    col1.metric("Registros disponibles", len(df))
+
     col2.metric("Marcas registradas", total_marcas)
+
     col3.metric("Modelos registrados", total_modelos)
 
     st.markdown("### Funciones disponibles")
@@ -456,6 +574,7 @@ if seccion == "Inicio":
     c1, c2 = st.columns(2)
 
     with c1:
+
         st.markdown(
             """
             <div class="info-card">
@@ -471,19 +590,20 @@ if seccion == "Inicio":
             <div class="info-card">
                 <h4>📋 Ficha técnica</h4>
                 Consulta especificaciones, pinout, software,
-                cables y manuales disponibles.
+                cables y manuales.
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     with c2:
+
         st.markdown(
             """
             <div class="info-card">
-                <h4>🧠 Reconocimiento de imágenes</h4>
-                Analiza fotografías de equipos industriales
-                para leer sus etiquetas.
+                <h4>🧠 Reconocimiento visual</h4>
+                Analiza fotografías para intentar leer
+                las etiquetas de los equipos.
             </div>
             """,
             unsafe_allow_html=True,
@@ -493,17 +613,16 @@ if seccion == "Inicio":
             """
             <div class="info-card">
                 <h4>🔌 Comunicación industrial</h4>
-                Consulta información sobre interfaces
-                y redes industriales.
+                Consulta información sobre interfaces y redes.
             </div>
             """,
             unsafe_allow_html=True,
         )
 
 
-# ============================================================
+# ==========================================================
 # BASE DE DATOS
-# ============================================================
+# ==========================================================
 
 elif seccion == "Base de datos":
 
@@ -514,38 +633,36 @@ elif seccion == "Base de datos":
     )
 
     st.caption(
-        f"Total de registros: {len(df)} | "
-        f"Total de columnas: {len(df.columns)}"
+        f"Registros: {len(df)} | Columnas: {len(df.columns)}"
     )
 
-    busqueda_tabla = st.text_input(
+    consulta = st.text_input(
         "Filtrar registros:",
-        placeholder="Escribe una marca, modelo o característica...",
-        key="filtro_base_datos",
+        placeholder="Escribe una marca, modelo o característica..."
     )
 
-    if busqueda_tabla.strip():
-        tabla = buscar_coincidencias(df, busqueda_tabla)
+    if consulta.strip():
+        tabla = buscar_coincidencias(df, consulta)
     else:
         tabla = df.copy()
 
     st.dataframe(
         tabla,
         use_container_width=True,
-        hide_index=True,
+        hide_index=True
     )
 
     st.download_button(
-        label="Descargar resultados en CSV",
+        "Descargar resultados en CSV",
         data=tabla.to_csv(index=False).encode("utf-8-sig"),
         file_name="PLC_SCAN_resultados.csv",
         mime="text/csv",
     )
 
 
-# ============================================================
+# ==========================================================
 # BUSCAR PLC
-# ============================================================
+# ==========================================================
 
 elif seccion == "Buscar PLC":
 
@@ -553,56 +670,54 @@ elif seccion == "Buscar PLC":
 
     consulta = st.text_input(
         "Ingresa la marca, modelo, familia o serie:",
-        placeholder="Ejemplo: Siemens, Allen-Bradley, KV-N60...",
+        placeholder="Ejemplo: Siemens S7-1200"
     )
 
     if consulta.strip():
 
-        resultados_busqueda = buscar_coincidencias(df, consulta)
+        resultados = buscar_coincidencias(df, consulta)
 
-        if resultados_busqueda.empty:
+        if resultados.empty:
+
             st.warning(
-                "No se encontraron coincidencias en la base de datos."
+                "No se encontraron coincidencias "
+                "en la base de datos."
             )
 
         else:
+
             st.success(
-                f"Se encontraron {len(resultados_busqueda)} coincidencia(s)."
+                f"Se encontraron {len(resultados)} coincidencia(s)."
             )
 
-            for indice, (_, fila) in enumerate(
-                resultados_busqueda.iterrows()
+            for numero, (_, fila) in enumerate(
+                resultados.iterrows()
             ):
 
                 marca = obtener_valor(
                     fila,
-                    ["Marca", "Fabricante"],
+                    ["Marca", "Fabricante"]
                 )
 
                 modelo = obtener_valor(
                     fila,
-                    ["Modelo exacto", "Modelo"],
-                )
-
-                familia = obtener_valor(
-                    fila,
-                    ["Familia", "Familia PLC"],
+                    ["Modelo exacto", "Modelo"]
                 )
 
                 with st.expander(
                     f"{marca} | {modelo}",
-                    expanded=(indice == 0),
+                    expanded=(numero == 0)
                 ):
 
                     st.write(f"**Marca:** {marca}")
+
                     st.write(f"**Modelo:** {modelo}")
-                    st.write(f"**Familia:** {familia}")
 
                     st.write(
-                        "**Tipo de PLC:** "
+                        "**Familia:** "
                         + obtener_valor(
                             fila,
-                            ["Clasificación", "Tipo de PLC", "Tipo"],
+                            ["Familia", "Familia PLC"]
                         )
                     )
 
@@ -610,284 +725,275 @@ elif seccion == "Buscar PLC":
                         "**Serie:** "
                         + obtener_valor(
                             fila,
-                            ["Serie / Subfamilia", "Serie", "Subfamilia"],
+                            ["Serie / Subfamilia", "Serie", "Subfamilia"]
                         )
+                    )
+
+                    st.write(
+                        "**Clasificación:** "
+                        + obtener_valor(
+                            fila,
+                            ["Clasificación", "Tipo de PLC", "Tipo"]
+                        )
+                    )
+
+                    st.write(
+                        "**Arquitectura:** "
+                        + obtener_valor(fila, ["Arquitectura"])
                     )
 
                     st.write(
                         "**Pinout:** "
                         + obtener_valor(
                             fila,
-                            ["Pin Out", "Pinout", "Pin Out / Pinout"],
+                            ["Pin Out", "Pinout"]
                         )
                     )
 
                     st.write(
-                        "**Interfaz:** "
+                        "**Interfaz visible:** "
                         + obtener_valor(
                             fila,
                             [
+                                "Interfaz / conector visible",
                                 "Interfaz",
-                                "Interfaces",
-                                "Interfaz de comunicación",
-                            ],
+                                "Interfaz / conector del pin out"
+                            ]
                         )
                     )
 
                     st.write(
-                        "**Cable:** "
+                        "**Cable / adaptador:** "
                         + obtener_valor(
                             fila,
-                            [
-                                "Cable",
-                                "Cable requerido",
-                                "Cable de programación",
-                            ],
+                            ["Cable / adaptador", "Cable"]
                         )
                     )
 
                     st.write(
                         "**Software:** "
-                        + obtener_valor(
-                            fila,
-                            ["Software", "Software de programación"],
-                        )
+                        + obtener_valor(fila, ["Software"])
                     )
 
                     manual = obtener_valor(
                         fila,
-                        ["Manual", "Manual PDF", "Manual técnico"],
+                        [
+                            "URL manual / documentación",
+                            "Manual",
+                            "Link manual"
+                        ]
                     )
 
-                    st.write("**Manual:**")
-                    mostrar_enlace_manual(
-                        manual,
-                        "Abrir manual técnico",
-                    )
+                    st.write("**Manual y documentación:**")
+
+                    mostrar_manual(manual, "Abrir manual")
 
 
-# ============================================================
+# ==========================================================
 # FICHA TÉCNICA
-# ============================================================
+# ==========================================================
 
 elif seccion == "Ficha técnica":
 
     st.subheader("📋 Ficha técnica del PLC")
 
-    if df.empty:
+    columna_marca = buscar_columna(
+        df,
+        ["Marca", "Fabricante"]
+    )
+
+    columna_modelo = buscar_columna(
+        df,
+        ["Modelo exacto", "Modelo"]
+    )
+
+    if columna_marca is None or columna_modelo is None:
+
+        st.error(
+            "No se encontraron las columnas Marca y Modelo. "
+            "Revisa los encabezados del Excel."
+        )
+
+    elif df.empty:
+
         st.warning("La base de datos no contiene registros.")
 
     else:
-        columna_marca = buscar_columna(
-            df,
-            ["Marca", "Fabricante"],
+
+        opciones = {}
+
+        for indice, fila_opcion in df.iterrows():
+
+            marca_opcion = valor_texto(
+                fila_opcion[columna_marca]
+            )
+
+            modelo_opcion = valor_texto(
+                fila_opcion[columna_modelo]
+            )
+
+            etiqueta = f"{marca_opcion} | {modelo_opcion}"
+
+            if etiqueta in opciones:
+                etiqueta = f"{etiqueta} | Registro {indice}"
+
+            opciones[etiqueta] = indice
+
+        seleccion = st.selectbox(
+            "Selecciona el equipo:",
+            list(opciones.keys())
         )
 
-        columna_modelo = buscar_columna(
-            df,
-            ["Modelo exacto", "Modelo"],
+        fila = df.loc[opciones[seleccion]]
+
+        st.markdown(
+            f"### {obtener_valor(fila, ['Marca', 'Fabricante'])} "
+            f"— {obtener_valor(fila, ['Modelo exacto', 'Modelo'])}"
         )
 
-        if columna_marca and columna_modelo:
+        col1, col2 = st.columns(2)
 
-            opciones = []
+        with col1:
 
-            for indice, fila in df.iterrows():
-                marca = valor_texto(fila[columna_marca])
-                modelo = valor_texto(fila[columna_modelo])
+            st.markdown("#### Identificación")
 
-                opciones.append(
-                    (f"{marca} | {modelo}", indice)
+            st.write(
+                "**Marca:** "
+                + obtener_valor(fila, ["Marca", "Fabricante"])
+            )
+
+            st.write(
+                "**Modelo:** "
+                + obtener_valor(fila, ["Modelo exacto", "Modelo"])
+            )
+
+            st.write(
+                "**Familia:** "
+                + obtener_valor(fila, ["Familia", "Familia PLC"])
+            )
+
+            st.write(
+                "**Serie / Subfamilia:** "
+                + obtener_valor(
+                    fila,
+                    ["Serie / Subfamilia", "Serie", "Subfamilia"]
                 )
+            )
 
-            etiquetas = [
-                etiqueta
-                for etiqueta, _ in opciones
+            st.write(
+                "**Clasificación:** "
+                + obtener_valor(
+                    fila,
+                    ["Clasificación", "Tipo de PLC", "Tipo"]
+                )
+            )
+
+            st.write(
+                "**Arquitectura:** "
+                + obtener_valor(fila, ["Arquitectura"])
+            )
+
+        with col2:
+
+            st.markdown("#### Conexión y programación")
+
+            st.write(
+                "**Pinout:** "
+                + obtener_valor(fila, ["Pin Out", "Pinout"])
+            )
+
+            st.write(
+                "**Interfaz / conector:** "
+                + obtener_valor(
+                    fila,
+                    [
+                        "Interfaz / conector del pin out",
+                        "Interfaz / conector visible",
+                        "Interfaz",
+                    ]
+                )
+            )
+
+            st.write(
+                "**Cable / adaptador:** "
+                + obtener_valor(
+                    fila,
+                    ["Cable / adaptador", "Cable"]
+                )
+            )
+
+            st.write(
+                "**Software:** "
+                + obtener_valor(fila, ["Software"])
+            )
+
+            st.write(
+                "**Estado del pinout:** "
+                + obtener_valor(
+                    fila,
+                    ["Estado del pin out", "Estado del pinout"]
+                )
+            )
+
+        st.divider()
+
+        st.markdown("#### Manual y documentación")
+
+        manual = obtener_valor(
+            fila,
+            [
+                "URL manual / documentación",
+                "Manual",
+                "Link manual"
             ]
+        )
 
-            seleccion = st.selectbox(
-                "Selecciona el equipo:",
-                etiquetas,
-            )
+        mostrar_manual(
+            manual,
+            "📘 Abrir manual del fabricante"
+        )
 
-            indice_seleccionado = dict(opciones)[seleccion]
-            fila = df.loc[indice_seleccionado]
+        st.markdown("#### Notas para reconocimiento")
 
-            marca = obtener_valor(
+        st.write(
+            obtener_valor(
                 fila,
-                ["Marca", "Fabricante"],
+                ["Notas para reconocimiento", "Notas", "Observaciones"]
             )
+        )
 
-            modelo = obtener_valor(
-                fila,
-                ["Modelo exacto", "Modelo"],
-            )
+        with st.expander("Ver todos los datos del registro"):
 
-            st.markdown(f"### {marca} — {modelo}")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.markdown("#### Identificación")
-
-                st.write(f"**Marca:** {marca}")
-                st.write(f"**Modelo:** {modelo}")
-
-                st.write(
-                    "**Familia:** "
-                    + obtener_valor(
-                        fila,
-                        ["Familia", "Familia PLC"],
-                    )
-                )
-
-                st.write(
-                    "**Serie / Subfamilia:** "
-                    + obtener_valor(
-                        fila,
-                        ["Serie / Subfamilia", "Serie", "Subfamilia"],
-                    )
-                )
-
-                st.write(
-                    "**Clasificación:** "
-                    + obtener_valor(
-                        fila,
-                        ["Clasificación", "Tipo de PLC", "Tipo"],
-                    )
-                )
-
-                st.write(
-                    "**Arquitectura:** "
-                    + obtener_valor(
-                        fila,
-                        ["Arquitectura"],
-                    )
-                )
-
-            with col2:
-                st.markdown("#### Conexión y programación")
-
-                st.write(
-                    "**Pinout:** "
-                    + obtener_valor(
-                        fila,
-                        ["Pin Out", "Pinout", "Pin Out / Pinout"],
-                    )
-                )
-
-                st.write(
-                    "**Interfaz:** "
-                    + obtener_valor(
-                        fila,
-                        [
-                            "Interfaz",
-                            "Interfaces",
-                            "Interfaz de comunicación",
-                        ],
-                    )
-                )
-
-                st.write(
-                    "**Cable requerido:** "
-                    + obtener_valor(
-                        fila,
-                        [
-                            "Cable",
-                            "Cable requerido",
-                            "Cable de programación",
-                        ],
-                    )
-                )
-
-                st.write(
-                    "**Software:** "
-                    + obtener_valor(
-                        fila,
-                        ["Software", "Software de programación"],
-                    )
-                )
-
-                st.write(
-                    "**Comunicación:** "
-                    + obtener_valor(
-                        fila,
-                        [
-                            "Comunicación",
-                            "Protocolos",
-                            "Red industrial",
-                            "Interfaces de comunicación",
-                        ],
-                    )
-                )
-
-            st.divider()
-
-            st.markdown("#### Manual y documentación")
-
-            manual = obtener_valor(
-                fila,
-                [
-                    "Manual",
-                    "Manual PDF",
-                    "Manual técnico",
-                    "Link manual",
-                ],
-            )
-
-            mostrar_enlace_manual(
-                manual,
-                "📘 Abrir manual del fabricante",
-            )
-
-            st.markdown("#### Información adicional")
-
-            notas = obtener_valor(
-                fila,
-                ["Notas", "Observaciones", "Información adicional"],
-            )
-
-            st.write(notas)
-
-            with st.expander(
-                "Ver todos los datos originales del registro"
-            ):
-                st.dataframe(
-                    fila.to_frame(name="Valor"),
-                    use_container_width=True,
-                )
-
-        else:
-            st.error(
-                "No se identificaron las columnas de marca y modelo. "
-                "Revisa los encabezados del archivo Excel."
+            st.dataframe(
+                fila.to_frame(name="Valor"),
+                use_container_width=True
             )
 
 
-# ============================================================
+# ==========================================================
 # RECONOCIMIENTO DEL PLC
-# ============================================================
+# ==========================================================
 
 elif seccion == "Reconocimiento del PLC":
 
+  
     st.subheader("🧠 Reconocimiento visual del PLC")
 
     st.write(
-        "Carga una fotografía del equipo para mejorar la imagen, "
-        "leer el texto de la etiqueta y buscar posibles coincidencias "
-        "en la base de datos de PLC SCAN."
+        "Carga una fotografía del PLC para mejorar la imagen, "
+        "leer su etiqueta mediante EasyOCR y buscar el modelo "
+        "en la base de datos."
     )
 
     st.info(
-        "La identificación se basa en el texto visible de la etiqueta. "
-        "Si la fotografía está demasiado borrosa, puede ser necesario "
-        "tomar otra imagen o confirmar manualmente el modelo."
+        "La identificación es preliminar. Se prioriza la coincidencia "
+        "del modelo y no solamente la marca."
     )
 
     archivo_imagen = st.file_uploader(
         "Selecciona una fotografía del PLC:",
         type=["jpg", "jpeg", "png", "webp"],
-        key="imagen_plc",
+        key="imagen_reconocimiento_plc"
     )
 
     if archivo_imagen is not None:
@@ -898,369 +1004,433 @@ elif seccion == "Reconocimiento del PLC":
             st.image(
                 imagen,
                 caption="Fotografía original",
-                use_container_width=True,
+                use_container_width=True
             )
 
-            if st.button(
-                "🔍 Mejorar imagen y buscar PLC",
-                key="analizar_plc",
-            ):
+            if st.button("🔍 Analizar fotografía"):
 
-                with st.spinner(
-                    "Mejorando la fotografía y leyendo la etiqueta..."
-                ):
+                try:
+                    import easyocr
+                    import numpy as np
 
-                    # Verificar el ejecutable antes de ejecutar el OCR
-                    if not os.path.isfile(
-                        pytesseract.pytesseract.tesseract_cmd
+                    # Cargar EasyOCR una sola vez por sesión.
+                    if "easyocr_reader_plc" not in st.session_state:
+                        with st.spinner(
+                            "Inicializando EasyOCR. "
+                            "La primera ejecución puede tardar..."
+                        ):
+                            st.session_state[
+                                "easyocr_reader_plc"
+                            ] = easyocr.Reader(
+                                ["en"],
+                                gpu=False
+                            )
+
+                    reader = st.session_state[
+                        "easyocr_reader_plc"
+                    ]
+
+                    with st.spinner(
+                        "Mejorando la imagen y leyendo la etiqueta..."
                     ):
-                        st.error(
-                            "No se encontró el ejecutable de Tesseract. "
-                            "Verifica packages.txt y los registros "
-                            "de implementación de Streamlit Cloud."
-                        )
-                        st.stop()
 
-                    try:
-                        # Aumentar el tamaño de la imagen
+                        # 1. Ampliar imágenes pequeñas sin excederse.
                         ancho, alto = imagen.size
-
                         factor = max(
-                            2,
-                            min(4, 1600 // max(ancho, 1)),
+                            1,
+                            min(3, 1800 // max(ancho, 1))
                         )
 
-                        imagen_mejorada = imagen.resize(
-                            (ancho * factor, alto * factor)
+                        imagen_ampliada = imagen.resize(
+                            (ancho * factor, alto * factor),
+                            Image.Resampling.LANCZOS
                         )
 
-                        # Mejorar contraste y nitidez
+                        # 2. Mejorar contraste y nitidez.
                         imagen_mejorada = ImageOps.autocontrast(
-                            imagen_mejorada
+                            imagen_ampliada
                         )
 
                         imagen_mejorada = ImageEnhance.Contrast(
                             imagen_mejorada
-                        ).enhance(1.6)
+                        ).enhance(1.8)
 
                         imagen_mejorada = ImageEnhance.Sharpness(
                             imagen_mejorada
                         ).enhance(2.0)
 
-                        imagen_mejorada = imagen_mejorada.filter(
-                            ImageFilter.UnsharpMask(
-                                radius=2,
-                                percent=150,
-                                threshold=3,
-                            )
+                        # 3. Crear versiones adicionales para OCR.
+                        imagen_gris = ImageOps.grayscale(
+                            imagen_mejorada
                         )
 
-                        st.image(
-                            imagen_mejorada,
-                            caption="Fotografía mejorada para lectura",
-                            use_container_width=True,
+                        imagen_blanco_negro = imagen_gris.point(
+                            lambda pixel: 255 if pixel > 145 else 0
                         )
 
-                        # Ejecutar reconocimiento de texto
-                        texto_detectado = pytesseract.image_to_string(
-                            imagen_mejorada,
-                            config="--psm 11",
+                        versiones = [
+                            ("Color mejorado", imagen_mejorada),
+                            ("Escala de grises", imagen_gris),
+                            ("Blanco y negro", imagen_blanco_negro),
+                        ]
+
+                        textos_detectados = []
+
+                        # 4. Ejecutar EasyOCR sobre cada versión.
+                        for nombre, version in versiones:
+
+                            resultados = reader.readtext(
+                                np.array(version),
+                                detail=0,
+                                paragraph=False
+                            )
+
+                            for resultado in resultados:
+                                resultado = str(resultado).strip()
+
+                                if (
+                                    resultado
+                                    and resultado not in textos_detectados
+                                ):
+                                    textos_detectados.append(resultado)
+
+                    st.image(
+                        imagen_mejorada,
+                        caption="Imagen preparada para reconocimiento",
+                        use_container_width=True
+                    )
+
+                    texto_detectado = "\n".join(
+                        textos_detectados
+                    )
+
+                    st.markdown("#### Texto detectado")
+
+                    st.text_area(
+                        "Texto leído de la etiqueta:",
+                        value=texto_detectado,
+                        height=180,
+                        key="texto_ocr_plc"
+                    )
+
+                    if not texto_detectado.strip():
+
+                        st.warning(
+                            "EasyOCR no pudo leer texto en esta fotografía. "
+                            "Prueba con una imagen más cercana, enfocada "
+                            "y con buena iluminación."
                         )
 
-                        st.subheader("📝 Texto leído de la etiqueta")
+                    else:
 
-                        if texto_detectado.strip():
-                            st.text_area(
-                                "Revisa el texto detectado:",
-                                value=texto_detectado,
-                                height=150,
-                                key="texto_ocr_plc",
+                        st.markdown(
+                            "#### Posibles coincidencias en la base de datos"
+                        )
+
+                        # Normalizar texto y eliminar separadores.
+                        texto_normalizado = normalizar_ocr(
+                            texto_detectado
+                        )
+
+                        texto_compacto = re.sub(
+                            r"[^A-Z0-9]",
+                            "",
+                            texto_normalizado.upper()
+                        )
+
+                        # Comparar códigos de modelo, no solo la marca.
+                        def comparar_modelo(modelo, texto):
+                            modelo_normalizado = normalizar_ocr(
+                                modelo
                             )
-                        else:
-                            st.warning(
-                                "No se pudo leer texto suficiente. "
-                                "Intenta tomar una fotografía más cercana, "
-                                "con buena iluminación y enfocada en la etiqueta."
+
+                            modelo_compacto = re.sub(
+                                r"[^A-Z0-9]",
+                                "",
+                                modelo_normalizado.upper()
                             )
 
-                        # Buscar coincidencias en Excel
-                        if texto_detectado.strip():
+                            if len(modelo_compacto) < 4:
+                                return 0.0
 
-                            texto_ocr = normalizar_ocr(
-                                texto_detectado
+                            if modelo_compacto in texto:
+                                return 100.0
+
+                            # Comparar ventanas de tamaño parecido
+                            # para tolerar errores pequeños del OCR.
+                            longitud = len(modelo_compacto)
+                            mejor_puntaje = 0.0
+
+                            longitud_minima = max(
+                                4,
+                                longitud - 2
                             )
 
-                            if df.empty:
-                                st.error(
-                                    "La base de datos no contiene registros "
-                                    "para realizar la búsqueda."
-                                )
+                            longitud_maxima = min(
+                                len(texto),
+                                longitud + 2
+                            )
 
-                            else:
-                                candidatos = []
+                            for tamano in range(
+                                longitud_minima,
+                                longitud_maxima + 1
+                            ):
+                                for inicio in range(
+                                    0,
+                                    len(texto) - tamano + 1
+                                ):
+                                    fragmento = texto[
+                                        inicio:inicio + tamano
+                                    ]
 
-                                palabras = re.findall(
-                                    r"[A-Za-z0-9][A-Za-z0-9._/-]*",
-                                    texto_detectado,
-                                )
+                                    puntaje = (
+                                        SequenceMatcher(
+                                            None,
+                                            modelo_compacto,
+                                            fragmento
+                                        ).ratio() * 100
+                                    )
 
-                                palabras_norm = [
-                                    normalizar_ocr(palabra)
-                                    for palabra in palabras
+                                    mejor_puntaje = max(
+                                        mejor_puntaje,
+                                        puntaje
+                                    )
+
+                            return mejor_puntaje
+
+                        candidatos = []
+
+                        for indice, fila in df.iterrows():
+
+                            marca = obtener_valor(
+                                fila,
+                                ["Marca", "Fabricante"]
+                            )
+
+                            modelo = obtener_valor(
+                                fila,
+                                ["Modelo exacto", "Modelo"]
+                            )
+
+                            if not modelo:
+                                continue
+
+                            puntaje_modelo = comparar_modelo(
+                                modelo,
+                                texto_compacto
+                            )
+
+                            # Evitar resultados basados únicamente
+                            # en una coincidencia de marca.
+                            if puntaje_modelo >= 72:
+
+                                coincidencias = [
+                                    (
+                                        "Modelo",
+                                        modelo,
+                                        round(puntaje_modelo, 1)
+                                    )
                                 ]
 
-                                for _, fila in df.iterrows():
-
-                                    valores = {
-                                        str(columna): str(valor)
-                                        for columna, valor in fila.items()
-                                        if pd.notna(valor)
-                                        and str(valor).strip().lower()
-                                        not in ("", "nan", "none", "null")
-                                    }
-
-                                    mejor_puntaje = 0
-                                    coincidencias = []
-
-                                    for columna, valor in valores.items():
-
-                                        valor_norm = normalizar_ocr(valor)
-
-                                        if len(valor_norm) < 3:
-                                            continue
-
-                                        if valor_norm in texto_ocr:
-                                            puntaje = 100
-
-                                        else:
-                                            puntaje = 0
-
-                                            for palabra in palabras_norm:
-                                                if len(palabra) < 3:
-                                                    continue
-
-                                                similitud = (
-                                                    SequenceMatcher(
-                                                        None,
-                                                        valor_norm,
-                                                        palabra,
-                                                    ).ratio() * 100
-                                                )
-
-                                                puntaje = max(
-                                                    puntaje,
-                                                    similitud,
-                                                )
-
-                                        if puntaje >= 75:
-                                            coincidencias.append(
-                                                (
-                                                    columna,
-                                                    valor,
-                                                    round(puntaje, 1),
-                                                )
-                                            )
-
-                                        mejor_puntaje = max(
-                                            mejor_puntaje,
-                                            puntaje,
-                                        )
-
-                                    if mejor_puntaje >= 65:
-                                        candidatos.append(
-                                            (
-                                                mejor_puntaje,
-                                                valores,
-                                                coincidencias,
-                                            )
-                                        )
-
-                                candidatos.sort(
-                                    key=lambda elemento: elemento[0],
-                                    reverse=True,
+                                marca_normalizada = re.sub(
+                                    r"[^A-Z0-9]",
+                                    "",
+                                    normalizar_ocr(marca).upper()
                                 )
 
-                                st.subheader(
-                                    "📋 Posibles coincidencias en la base de datos"
-                                )
+                                if (
+                                    marca_normalizada
+                                    and len(marca_normalizada) >= 3
+                                    and marca_normalizada in texto_compacto
+                                ):
+                                    coincidencias.append(
+                                        ("Marca", marca, 100.0)
+                                    )
 
-                                if candidatos:
-
-                                    for numero, (
-                                        puntaje,
-                                        valores,
+                                candidatos.append(
+                                    (
+                                        puntaje_modelo,
+                                        marca,
+                                        modelo,
                                         coincidencias,
-                                    ) in enumerate(
-                                        candidatos[:5],
-                                        start=1,
+                                        indice
+                                    )
+                                )
+
+                        candidatos.sort(
+                            key=lambda candidato: candidato[0],
+                            reverse=True
+                        )
+
+                        if not candidatos:
+
+                            st.warning(
+                                "Se detectó texto, pero no se encontró "
+                                "una coincidencia suficientemente clara "
+                                "con los modelos de la base de datos. "
+                                "Verifica el texto leído o prueba con "
+                                "una fotografía más nítida."
+                            )
+
+                        else:
+
+                            for numero, candidato in enumerate(
+                                candidatos[:5],
+                                start=1
+                            ):
+
+                                (
+                                    puntaje,
+                                    marca,
+                                    modelo,
+                                    coincidencias,
+                                    indice
+                                ) = candidato
+
+                                with st.expander(
+                                    f"{numero}. {marca} | {modelo}",
+                                    expanded=(numero == 1)
+                                ):
+
+                                    st.write(
+                                        f"**Puntuación orientativa del "
+                                        f"modelo:** {puntaje:.1f}%"
+                                    )
+
+                                    st.write(f"**Marca:** {marca}")
+                                    st.write(f"**Modelo:** {modelo}")
+
+                                    for (
+                                        nombre,
+                                        valor,
+                                        similitud
+                                    ) in coincidencias:
+
+                                        st.write(
+                                            f"- **{nombre}:** {valor} "
+                                            f"({similitud:.1f}%)"
+                                        )
+
+                                    if st.button(
+                                        "Consultar ficha técnica",
+                                        key=f"ficha_ocr_{indice}"
                                     ):
+                                        st.session_state[
+                                            "modelo_reconocido"
+                                        ] = indice
 
-                                        with st.expander(
-                                            f"Posible coincidencia {numero}",
-                                            expanded=(numero == 1),
-                                        ):
+                                        st.success(
+                                            "Modelo seleccionado. "
+                                            "Consulta la sección Ficha técnica."
+                                        )
 
-                                            st.caption(
-                                                "Puntuación orientativa: "
-                                                f"{puntaje:.1f}%"
-                                            )
-
-                                            for columna, valor in valores.items():
-
-                                                encabezado = normalizar_ocr(
-                                                    columna
-                                                )
-
-                                                if any(
-                                                    palabra in encabezado
-                                                    for palabra in [
-                                                        "marca",
-                                                        "fabricante",
-                                                        "modelo",
-                                                        "nombre",
-                                                        "tipo",
-                                                    ]
-                                                ):
-                                                    st.write(
-                                                        f"**{columna}:** {valor}"
-                                                    )
-
-                                            if coincidencias:
-                                                st.write(
-                                                    "**Datos que coincidieron "
-                                                    "con la etiqueta:**"
-                                                )
-
-                                                for (
-                                                    columna,
-                                                    valor,
-                                                    similitud,
-                                                ) in coincidencias[:5]:
-
-                                                    st.write(
-                                                        f"- **{columna}:** "
-                                                        f"{valor} "
-                                                        f"({similitud:.1f}%)"
-                                                    )
-
-                                    st.warning(
-                                        "Estas son coincidencias preliminares, "
-                                        "no una identificación confirmada. "
-                                        "Verifica el modelo en la etiqueta física."
-                                    )
-
-                                else:
-                                    st.warning(
-                                        "No se encontraron coincidencias claras "
-                                        "en el Excel. Revisa el texto detectado "
-                                        "o intenta con una fotografía más nítida."
-                                    )
-
-                    except Exception as error:
-                        st.error(
-                            "No se pudo completar el reconocimiento."
-                        )
-                        st.code(str(error))
-                        st.info(
-                            "Comprueba que Tesseract esté instalado y que "
-                            "sus dependencias estén configuradas en la "
-                            "aplicación publicada."
-                        )
+                            st.warning(
+                                "La puntuación es una similitud orientativa, "
+                                "no una probabilidad de identificación "
+                                "correcta. Confirma siempre el código "
+                                "en la etiqueta física."
+                            )
+                  
+                except Exception as error:
+                    st.error(
+                        "No se pudo ejecutar el reconocimiento con EasyOCR."
+                    )
+                    st.exception(error)
 
         except Exception as error:
-            st.error("No se pudo abrir la fotografía seleccionada.")
-            st.code(str(error))
+            st.error("No se pudo procesar la fotografía.")
+            st.exception(error)
 
 
-# ============================================================
+# ==========================================================
 # COMUNICACIÓN INDUSTRIAL
-# ============================================================
+# ==========================================================
 
 elif seccion == "Comunicación industrial":
 
     st.subheader("🔌 Comunicación industrial")
 
     st.write(
-        "Consulta información introductoria sobre interfaces "
-        "y redes utilizadas en automatización industrial."
+        "Información introductoria sobre interfaces y redes "
+        "utilizadas en automatización industrial."
     )
 
     with st.expander("RS-485"):
+
         st.write(
-            "Interfaz eléctrica diferencial utilizada para "
-            "transmisión de datos en entornos industriales. "
-            "Puede emplearse con protocolos como Modbus RTU, "
-            "según el equipo y su configuración."
+            "Interfaz eléctrica diferencial empleada para transmitir "
+            "datos en ambientes industriales. Puede utilizarse con "
+            "protocolos como Modbus RTU, según el equipo."
         )
 
         st.write(
-            "**Consideraciones:** verificar el pinout, la polaridad "
-            "de las líneas, la referencia eléctrica, la velocidad "
-            "de comunicación y la terminación cuando corresponda."
+            "**Verificar:** pinout, polaridad de las líneas, "
+            "referencia eléctrica, velocidad y terminación cuando corresponda."
         )
 
     with st.expander("Ethernet industrial"):
+
         st.write(
-            "Permite la comunicación mediante redes basadas "
-            "en Ethernet. El conector físico por sí solo no "
-            "determina el protocolo compatible."
+            "Permite comunicación mediante redes basadas en Ethernet. "
+            "La presencia de un conector RJ45 no garantiza que dos "
+            "equipos utilicen el mismo protocolo."
         )
 
         st.write(
-            "**Consideraciones:** comprobar el protocolo, la dirección IP, "
-            "los parámetros de red y el software requerido por el fabricante."
+            "**Verificar:** protocolo compatible, parámetros de red, "
+            "dirección IP y software del fabricante."
         )
 
     with st.expander("PROFIBUS"):
+
         st.write(
-            "Red de comunicación industrial utilizada para "
-            "intercambio de datos entre controladores y dispositivos de campo."
+            "Red industrial utilizada para comunicar controladores "
+            "y dispositivos de campo."
         )
 
         st.write(
-            "**Consideraciones:** identificar la variante de PROFIBUS, "
-            "el conector, el cableado y la configuración de red existente."
+            "**Verificar:** variante de PROFIBUS, conector, cableado, "
+            "terminación y configuración de red."
         )
 
     with st.expander("USB"):
+
         st.write(
-            "Puede utilizarse para programación, diagnóstico "
-            "o configuración, dependiendo del modelo de PLC."
+            "Puede utilizarse para programación, diagnóstico o "
+            "configuración, dependiendo del modelo de PLC."
         )
 
         st.write(
-            "**Consideraciones:** confirmar el tipo de puerto, el cable "
-            "o interfaz requerido y los controladores de software necesarios."
+            "**Verificar:** tipo de puerto, cable requerido, "
+            "controladores y software de programación."
         )
 
     with st.expander("Pinout e interfaces"):
+
         st.write(
-            "El pinout describe la asignación de señales en un conector. "
-            "Debe verificarse en el manual del modelo específico "
-            "antes de conectar un equipo."
+            "El pinout describe la asignación de señales de un conector. "
+            "Debe verificarse en el manual del modelo exacto antes "
+            "de realizar una conexión."
         )
 
         st.warning(
-            "No selecciones un cable únicamente por la forma del conector. "
+            "No selecciones un cable solamente por la forma del conector. "
             "Dos conectores físicamente iguales pueden tener asignaciones "
             "de pines diferentes."
         )
 
 
-# ============================================================
+# ==========================================================
 # PIE DE PÁGINA
-# ============================================================
+# ==========================================================
 
 st.divider()
 
 st.markdown(
     """
     <div style="text-align:center; color:#AFC8E2; padding:10px;">
-        PLC SCAN | Automatización Industrial | DJH
+        PLC SCAN | Automatización Industrial
     </div>
     """,
     unsafe_allow_html=True,
 )
-            
-
-
