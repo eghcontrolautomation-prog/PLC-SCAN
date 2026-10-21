@@ -1,6 +1,6 @@
 streamlit
 pandas
-Pillow
-pytesseract
 openpyxl
-easyocr
+Pillow
+numpy
+rapidocr-onnxruntime
