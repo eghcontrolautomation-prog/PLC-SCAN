@@ -32,6 +32,40 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+import hmac
+
+def verificar_acceso():
+    try:
+        clave = str(st.secrets["PLC_SCAN_CLAVE"]).strip()
+    except Exception:
+        clave = os.environ.get("PLC_SCAN_CLAVE", "").strip()
+
+    if not clave:
+        st.error("🔒 Acceso bloqueado. Contacta al administrador de PLC SCAN.")
+        st.stop()
+
+    if st.session_state.get("autenticado", False):
+        return
+
+    st.markdown("## 🔒 PLC SCAN — Acceso restringido")
+    ingresada = st.text_input(
+        "Contraseña:",
+        type="password",
+        key="clave_acceso"
+    )
+
+    if st.button("Ingresar", key="btn_ingresar"):
+        if hmac.compare_digest(ingresada, clave):
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+
+    st.stop()
+
+verificar_acceso()
+
+
 
 # ==========================================================
 # DISEÑO
