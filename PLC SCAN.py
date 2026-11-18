@@ -1161,10 +1161,21 @@ elif seccion == "Reconocimiento del PLC":
                             "#### Posibles coincidencias en la base de datos"
                         )
 
-                        # Normalizar texto y eliminar separadores.
-                        texto_normalizado = normalizar_ocr(
-                            texto_detectado
-                        )
+                        # ==========================================
+                        # COMPARACIÓN INTELIGENTE CON LA BASE DE DATOS
+                        # ==========================================
+
+                        texto_normalizado = normalizar_ocr(texto_detectado)
+
+                        lineas_ocr = [
+                            re.sub(
+                                r"[^A-Z0-9]",
+                                "",
+                                normalizar_ocr(linea).upper()
+                            )
+                            for linea in texto_detectado.splitlines()
+                            if linea.strip()
+                        ]
 
                         texto_compacto = re.sub(
                             r"[^A-Z0-9]",
@@ -1172,65 +1183,55 @@ elif seccion == "Reconocimiento del PLC":
                             texto_normalizado.upper()
                         )
 
-                        # Comparar códigos de modelo, no solo la marca.
-                        def comparar_modelo(modelo, texto):
-                            modelo_normalizado = normalizar_ocr(
-                                modelo
-                            )
-
-                            modelo_compacto = re.sub(
-                                r"[^A-Z0-9]",
-                                "",
-                                modelo_normalizado.upper()
-                            )
-
-                            if len(modelo_compacto) < 4:
+                        def similitud_campo(valor, fragmentos):
+                            if not valor:
                                 return 0.0
 
-                            if modelo_compacto in texto:
-                                return 100.0
-
-                            # Comparar ventanas de tamaño parecido
-                            # para tolerar errores pequeños del OCR.
-                            longitud = len(modelo_compacto)
-                            mejor_puntaje = 0.0
-
-                            longitud_minima = max(
-                                4,
-                                longitud - 2
+                            objetivo = re.sub(
+                                r"[^A-Z0-9]",
+                                "",
+                                normalizar_ocr(str(valor)).upper()
                             )
 
-                            longitud_maxima = min(
-                                len(texto),
-                                longitud + 2
-                            )
+                            if len(objetivo) < 3:
+                                return 0.0
 
-                            for tamano in range(
-                                longitud_minima,
-                                longitud_maxima + 1
-                            ):
-                                for inicio in range(
-                                    0,
-                                    len(texto) - tamano + 1
-                                ):
-                                    fragmento = texto[
-                                        inicio:inicio + tamano
-                                    ]
+                            mejor = 0.0
 
-                                    puntaje = (
-                                        SequenceMatcher(
+                            for fragmento in fragmentos:
+                                if not fragmento:
+                                    continue
+
+                                if objetivo in fragmento:
+                                    return 100.0
+
+                                longitud = len(objetivo)
+
+                                minimo = max(3, longitud - 2)
+                                maximo = min(
+                                    len(fragmento),
+                                    longitud + 2
+                                )
+
+                                for tamano in range(minimo, maximo + 1):
+                                    for inicio in range(
+                                        len(fragmento) - tamano + 1
+                                    ):
+                                        ventana = fragmento[
+                                            inicio:inicio + tamano
+                                        ]
+
+                                        puntaje = SequenceMatcher(
                                             None,
-                                            modelo_compacto,
-                                            fragmento
+                                            objetivo,
+                                            ventana
                                         ).ratio() * 100
-                                    )
 
-                                    mejor_puntaje = max(
-                                        mejor_puntaje,
-                                        puntaje
-                                    )
+                                        mejor = max(mejor, puntaje)
 
-                            return mejor_puntaje
+                            return mejor
+
+                        fragmentos_ocr = lineas_ocr + [texto_compacto]
 
                         candidatos = []
 
@@ -1246,104 +1247,220 @@ elif seccion == "Reconocimiento del PLC":
                                 ["Modelo exacto", "Modelo"]
                             )
 
+                            familia = obtener_valor(
+                                fila,
+                                ["FAMILIA", "Familia"]
+                            )
+
+                            serie = obtener_valor(
+                                fila,
+                                ["SERIE / SUBFAMILIA", "Serie", "Subfamilia"]
+                            )
+
                             if not modelo:
                                 continue
 
-                            puntaje_modelo = comparar_modelo(
+                            puntaje_modelo = similitud_campo(
                                 modelo,
-                                texto_compacto
+                                fragmentos_ocr
                             )
 
-                            # Evitar resultados basados únicamente
-                            # en una coincidencia de marca.
-                            if puntaje_modelo >= 72:
+                            puntaje_familia = similitud_campo(
+                                familia,
+                                fragmentos_ocr
+                            )
 
-                                coincidencias = [
-                                    (
-                                        "Modelo",
-                                        modelo,
-                                        round(puntaje_modelo, 1)
-                                    )
-                                ]
+                            puntaje_serie = similitud_campo(
+                                serie,
+                                fragmentos_ocr
+                            )
 
-                                marca_normalizada = re.sub(
-                                    r"[^A-Z0-9]",
-                                    "",
-                                    normalizar_ocr(marca).upper()
+                            puntaje_marca = similitud_campo(
+                                marca,
+                                fragmentos_ocr
+                            )
+
+                            # El modelo tiene mayor peso.
+                            componentes = [
+                                (puntaje_modelo, 0.85)
+                            ]
+
+                            if familia:
+                                componentes.append(
+                                    (puntaje_familia, 0.08)
                                 )
 
-                                if (
-                                    marca_normalizada
-                                    and len(marca_normalizada) >= 3
-                                    and marca_normalizada in texto_compacto
-                                ):
-                                    coincidencias.append(
-                                        ("Marca", marca, 100.0)
-                                    )
-
-                                candidatos.append(
-                                    (
-                                        puntaje_modelo,
-                                        marca,
-                                        modelo,
-                                        coincidencias,
-                                        indice
-                                    )
+                            if serie:
+                                componentes.append(
+                                    (puntaje_serie, 0.05)
                                 )
+
+                            if marca:
+                                componentes.append(
+                                    (puntaje_marca, 0.02)
+                                )
+
+                            peso_total = sum(
+                                peso for valor, peso in componentes
+                            )
+
+                            puntaje_final = sum(
+                                valor * peso
+                                for valor, peso in componentes
+                            ) / peso_total
+
+                            # No aceptar coincidencias basadas
+                            # solamente en la marca.
+                            if (
+                                puntaje_modelo >= 60
+                                or (
+                                    puntaje_modelo >= 45
+                                    and puntaje_familia >= 70
+                                )
+                            ):
+                                candidatos.append({
+                                    "puntaje": puntaje_final,
+                                    "marca": marca,
+                                    "modelo": modelo,
+                                    "familia": familia,
+                                    "serie": serie,
+                                    "indice": indice,
+                                    "puntaje_modelo": puntaje_modelo
+                                })
 
                         candidatos.sort(
-                            key=lambda candidato: candidato[0],
+                            key=lambda x: x["puntaje"],
                             reverse=True
+                        )
+
+                        st.markdown(
+                            "#### Posibles coincidencias en la base de datos"
                         )
 
                         if not candidatos:
 
                             st.warning(
-                                "Se detectó texto, pero no se encontró "
-                                "una coincidencia suficientemente clara "
-                                "con los modelos de la base de datos. "
-                                "Verifica el texto leído o prueba con "
-                                "una fotografía más nítida."
+                                "No se encontraron modelos suficientemente "
+                                "similares. Intenta con una fotografía "
+                                "más cercana y enfocada."
                             )
 
                         else:
+
+                            st.success(
+                                f"Se encontraron {len(candidatos)} "
+                                "posibles coincidencias."
+                            )
 
                             for numero, candidato in enumerate(
                                 candidatos[:5],
                                 start=1
                             ):
 
-                                (
-                                    puntaje,
-                                    marca,
-                                    modelo,
-                                    coincidencias,
-                                    indice
-                                ) = candidato
+                                indice = candidato["indice"]
+                                fila = df.loc[indice]
+
+                                marca = candidato["marca"]
+                                modelo = candidato["modelo"]
 
                                 with st.expander(
                                     f"{numero}. {marca} | {modelo}",
                                     expanded=(numero == 1)
                                 ):
 
-                                    st.write(
-                                        f"**Puntuación orientativa del "
-                                        f"modelo:** {puntaje:.1f}%"
+                                    st.metric(
+                                        "Similitud orientativa",
+                                        f'{candidato["puntaje"]:.1f}%'
                                     )
 
                                     st.write(f"**Marca:** {marca}")
                                     st.write(f"**Modelo:** {modelo}")
 
-                                    for (
-                                        nombre,
-                                        valor,
-                                        similitud
-                                    ) in coincidencias:
-
+                                    if candidato["familia"]:
                                         st.write(
-                                            f"- **{nombre}:** {valor} "
-                                            f"({similitud:.1f}%)"
+                                            f'**Familia:** '
+                                            f'{candidato["familia"]}'
                                         )
+
+                                    if candidato["serie"]:
+                                        st.write(
+                                            f'**Serie / Subfamilia:** '
+                                            f'{candidato["serie"]}'
+                                        )
+
+                                    st.divider()
+
+                                    # DATOS DE CONEXIÓN
+                                    st.markdown("##### 🔌 Interfaz y conexión")
+
+                                    campos = [
+                                        (
+                                            "Clasificación",
+                                            ["CLASIFICACIÓN", "Clasificación"]
+                                        ),
+                                        (
+                                            "Arquitectura",
+                                            ["ARQUITECTURA", "Arquitectura"]
+                                        ),
+                                        (
+                                            "Pinout",
+                                            ["PIN OUT", "Pinout"]
+                                        ),
+                                        (
+                                            "Interfaz / Conector",
+                                            [
+                                                "INTERFAZ / CONECTOR DEL PIN OUT",
+                                                "Interfaz / Conector del pinout",
+                                                "Interfaz"
+                                            ]
+                                        ),
+                                        (
+                                            "Cable / Adaptador",
+                                            ["Cable/adaptador", "Cable", "Adaptador"]
+                                        ),
+                                        (
+                                            "Software",
+                                            ["Software", "Programa"]
+                                        )
+                                    ]
+
+                                    for etiqueta, columnas in campos:
+                                        valor = obtener_valor(
+                                            fila,
+                                            columnas
+                                        )
+
+                                        if valor:
+                                            st.write(
+                                                f"**{etiqueta}:** {valor}"
+                                            )
+
+                                    # MANUAL
+                                    manual = obtener_valor(
+                                        fila,
+                                        [
+                                            "URL MANUAL / DOCUMENTACIÓN",
+                                            "Manual",
+                                            "URL Manual",
+                                            "Documentación"
+                                        ]
+                                    )
+
+                                    st.markdown("##### 📘 Manual y documentación")
+
+                                    if manual and str(manual).startswith(
+                                        ("http://", "https://")
+                                    ):
+                                        st.markdown(
+                                            f"[Abrir manual o documentación]({manual})"
+                                        )
+                                    else:
+                                        st.info(
+                                            "No hay un enlace de manual "
+                                            "registrado para este modelo."
+                                        )
+
+                                    st.divider()
 
                                     if st.button(
                                         "Consultar ficha técnica",
@@ -1355,16 +1472,17 @@ elif seccion == "Reconocimiento del PLC":
 
                                         st.success(
                                             "Modelo seleccionado. "
-                                            "Consulta la sección Ficha técnica."
+                                            "Consulta la sección "
+                                            "Ficha técnica."
                                         )
 
                             st.warning(
-                                "La puntuación es una similitud orientativa, "
-                                "no una probabilidad de identificación "
-                                "correcta. Confirma siempre el código "
-                                "en la etiqueta física."
+                                "La similitud es orientativa y no representa "
+                                "una probabilidad de identificación correcta. "
+                                "Verifica siempre el modelo en la etiqueta "
+                                "física del PLC."
                             )
-                  
+
                 except Exception as error:
                     st.error(
                         "No se pudo ejecutar el reconocimiento con EasyOCR."
